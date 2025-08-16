@@ -137,14 +137,24 @@ async function handleSpeech(): Promise<string> {
     let audioMsSent = 0;
     let transcriptionReceived = false;
 
-    const stopMic = () => {
-      if (arecord) {
-        try { 
-          arecord.kill("SIGTERM"); 
+ const stopMic = () => {
+  if (arecord) {
+    try {
+      // First try graceful shutdown
+      arecord.kill("SIGINT");
+      
+      // Fallback to force kill after timeout
+      setTimeout(() => {
+        if (arecord) {
+          arecord.kill("SIGKILL");
           arecord = null;
-        } catch {}
-      }
-    };
+        }
+      }, 1000);
+    } catch {
+      arecord = null;
+    }
+  }
+};
 
     const cleanup = () => {
       stopMic();
@@ -245,14 +255,6 @@ async function handleSpeech(): Promise<string> {
           console.log("🔇 Speech stopped, committing buffer");
           stopMic();
           
-          if (audioMsSent >= MIN_COMMIT_MS) {
-            ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-          } else {
-            console.log("⚠️ Audio too short, not committing");
-            cleanup();
-            clearTimeout(timeout);
-            resolve("");
-          }
           break;
 
         case "input_audio_buffer.committed":
