@@ -18,8 +18,8 @@ const KEYWORD = BuiltinKeyword.COMPUTER;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 const ALSA_DEVICE = process.env.ALSA_DEVICE || "plughw:3,0";
-const SAMPLE_RATE = 16000;              // Porcupine/ASR standard
-const MIN_COMMIT_MS = 200;              // avoid empty-commit errors
+const SAMPLE_RATE = 16000;              
+const MIN_COMMIT_MS = 200;         
 
 function msFromPcmBytes(bytes: number, sr = SAMPLE_RATE) {
   const samples = bytes / 2;            // 16-bit mono
@@ -67,15 +67,14 @@ export async function start() {
     while (recorder.isRecording) {
       const frame = await recorder.read();        
       const idx = porcupine.process(frame);
-      if (idx >= 0) {
-        const now = Date.now();
-        if (now - lastDetect < REFRACTORY_MS) continue; // debounce
-        lastDetect = now;
+if (idx >= 0) {
+  const now = Date.now();
+  if (now - lastDetect < REFRACTORY_MS) continue;
+  lastDetect = now;
 
-        console.log("🔵 Wake word detected!");
-        // Pause wake detection while you capture STT
-        await pauseAndHandle(recorder, porcupine);
-      }
+  console.log("🔵 Wake word detected!");
+  recorder = await pauseAndHandle(recorder, porcupine); // ← get the new instance
+}
     }
   } catch (err) {
     console.error("❌ Error:", err);
@@ -85,29 +84,24 @@ export async function start() {
   }
 }
 
-async function pauseAndHandle(recorder: PvRecorder, porcupine: Porcupine) {
-
+async function pauseAndHandle(rec: PvRecorder, porcupine: Porcupine): Promise<PvRecorder> {
   try {
-   recorder.stop();
-    
-    // Wait for speech handling to complete
+    try { rec.stop(); } catch {}
+    try { rec.release(); } catch {}
+
     const transcript = await handleSpeech();
-    
     if (transcript) {
       console.log("💬 Processing:", transcript);
-      // Here you would send to your gRPC service, get response, etc.
       await handleTranscript(transcript);
     }
   } catch (e) {
     console.error("❌ handle error:", e);
   } finally {
-    // resume wake detection
-    try {
-      if (!recorder.isRecording) await recorder.start();
-      console.log("🔁 Back to wake-word listening…");
-    } catch (e) {
-      console.error("⚠️ Failed to restart recorder:", e);
-    }
+    // recreate recorder for wake loop
+    const newRec = new PvRecorder(FRAME_LENGTH, DEVICE_INDEX);
+    await newRec.start();
+    console.log("🔁 Back to wake-word listening…");
+    return newRec;
   }
 }
 
@@ -122,28 +116,16 @@ async function handleTranscript(transcript: string) {
   await sleep(100);
 }
 
-// async function handleWakeWordDetection() {
-//   // placeholder: plug in your STT streaming, then return
-//   // keep this fast; don’t block for long work here
-//   await sleep(100);
-// }
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-// run if invoked directly
-if (require.main === module) {
-  start().catch((e) => {
-    console.error("❌ Startup failed:", e);
-    process.exit(1);
-  });
-}
-
-
 async function handleSpeech(): Promise<string> {
+
+
   return new Promise((resolve, reject) => {
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+     const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
     const ws = new WebSocket(url, {
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
