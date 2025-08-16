@@ -12,10 +12,9 @@ dotenv.config();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 
-const openai = new OpenAI();
 
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
-const ALSA_DEVICE = process.env.ALSA_DEVICE || "plughw:3,0";
+const ALSA_DEVICE = "plughw:4,0"
 
 // We’ll request raw PCM16 at 24 kHz mono so we can pipe to aplay.
 const OUT_SAMPLE_RATE = 24000;
@@ -37,7 +36,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
             if (aplay) return;
             aplay = spawn("aplay", [
                 "-q",
-                "-D", ALSA_DEVICE,
+                "-D", "plughw:4,0",
                 "-f", "S16_LE",
                 "-c", "1",
                 "-r", String(OUT_SAMPLE_RATE),
@@ -62,41 +61,38 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
         };
 
         ws.on("open", () => {
-            // 1) Configure session: we want audio out.
+            // 1) Configure the session (optional—can also set per response)
             ws.send(JSON.stringify({
                 type: "session.update",
                 session: {
-                    // allow audio responses in this session
                     modalities: ["audio", "text"],
-                    // not strictly required here, but good to declare defaults
+                    // default output format for this connection
                     output_audio_format: "pcm16",
+                    // default voice for this connection
+                    voice: "alloy",
                 },
             }));
 
-            // 2) Add the user's message to the conversation.
+            // 2) Add the user's message
             ws.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: {
                     type: "message",
                     role: "user",
-                    content: [
-                        { type: "input_text", text: transcript }
-                    ]
-                }
+                    content: [{ type: "input_text", text: transcript }],
+                },
             }));
 
-            // 3) Ask the model to respond with audio.
+            // 3) Ask the model to respond with audio (override session defaults if you want)
             ws.send(JSON.stringify({
                 type: "response.create",
                 response: {
                     modalities: ["audio", "text"],
                     instructions: "Answer concisely for spoken playback.",
-                    audio: {
-                        voice: "alloy",
-                        format: "pcm16",
-                        sample_rate_hz: OUT_SAMPLE_RATE
-                    }
-                }
+                    // ✅ audio config belongs here, not as response.audio
+                    output_audio_format: "pcm16",
+                    voice: "alloy"
+                },
             }));
         });
 
@@ -104,10 +100,12 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
             const evt = JSON.parse(raw.toString());
             const t = evt.type as string;
 
+            console.log("the t", t)
             switch (t) {
                 // Streamed PCM16 audio chunks (base64). Write to aplay stdin.
                 case "response.audio.delta": {
                     if (!startedAudio) {
+                        console.log("this should open the aplay")
                         openAplay();
                         startedAudio = true;
                     }
@@ -119,7 +117,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
                 // Optional textual deltas if you want to log partial text:
                 case "response.output_text.delta": {
-                    // console.log(evt.delta);
+                    console.log(evt.delta);
                     break;
                 }
 
