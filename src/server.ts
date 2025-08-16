@@ -4,6 +4,8 @@ import * as dotenv from "dotenv";
 import OpenAI from 'openai';
 import WebSocket from "ws";
 import { config } from "dotenv";
+import { Client } from "@grpc/grpc-js";
+import { answerAndSpeakRealtime } from "./speak";
 
 config();
 
@@ -18,6 +20,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 const SAMPLE_RATE = 16000;
 
+const openai = new OpenAI();
 
 export async function start() {
     const ACCESS_KEY = process.env.PICOVOICE_ACCESS_KEY;
@@ -94,18 +97,6 @@ async function pauseAndHandle(rec: PvRecorder): Promise<PvRecorder> {
     console.log("🔁 Back to wake-word listening…");
     return rec; // Return the same recorder instance
 }
-
-async function handleTranscript(transcript: string) {
-    // This is where you'd:
-    // 1. Send transcript to GPT for response
-    // 2. Get response
-    // 3. Convert to speech with TTS
-    // 4. Play audio response
-    console.log("🤖 Would process:", transcript);
-    // For now, just a placeholder
-    await sleep(100);
-}
-
 
 async function handleSpeechWithPvRecorder(recorder: PvRecorder): Promise<string> {
 
@@ -264,6 +255,13 @@ async function handleSpeechWithPvRecorder(recorder: PvRecorder): Promise<string>
         captureLoop();
     });
 }
+
+async function handleTranscript(transcript: string) {
+    console.log("🤖 Would process:", transcript);
+
+    await answerAndSpeakRealtime(transcript);
+}
+
 
 if (require.main === module) {
     start().catch((e) => {
