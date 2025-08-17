@@ -1,10 +1,7 @@
-import { Porcupine, BuiltinKeyword } from "@picovoice/porcupine-node";
-import { PvRecorder } from "@picovoice/pvrecorder-node";
+//this streams the vopice frames from the server to the client
+
 import * as dotenv from "dotenv";
-import OpenAI from 'openai';
 import WebSocket from "ws";
-import { config } from "dotenv";
-import { Client } from "@grpc/grpc-js";
 import { spawn } from "node:child_process";
 
 dotenv.config();
@@ -36,7 +33,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
             if (aplay) return;
             aplay = spawn("aplay", [
                 "-q",
-                "-D", "plughw:4,0",
+                "-D", ALSA_DEVICE,
                 "-f", "S16_LE",
                 "-c", "1",
                 "-r", String(OUT_SAMPLE_RATE),
@@ -88,7 +85,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                 type: "response.create",
                 response: {
                     modalities: ["audio", "text"],
-                    instructions: "Answer concisely for spoken playback.",
+                    instructions: "Answer concisely for spoken playback. Keep the answer to less than 2 sentences.",
                     // ✅ audio config belongs here, not as response.audio
                     output_audio_format: "pcm16",
                     voice: "alloy"
@@ -105,7 +102,6 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                 // Streamed PCM16 audio chunks (base64). Write to aplay stdin.
                 case "response.audio.delta": {
                     if (!startedAudio) {
-                        console.log("this should open the aplay")
                         openAplay();
                         startedAudio = true;
                     }

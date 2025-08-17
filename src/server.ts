@@ -20,8 +20,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 const SAMPLE_RATE = 16000;
 
-const openai = new OpenAI();
-
 export async function start() {
     const ACCESS_KEY = process.env.PICOVOICE_ACCESS_KEY;
     if (!ACCESS_KEY) throw new Error("PICOVOICE_ACCESS_KEY not set in environment");
