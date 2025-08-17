@@ -1,15 +1,11 @@
 import { Porcupine, BuiltinKeyword } from "@picovoice/porcupine-node";
 import { PvRecorder } from "@picovoice/pvrecorder-node";
-import * as dotenv from "dotenv";
-import OpenAI from 'openai';
 import WebSocket from "ws";
 import { config } from "dotenv";
-import { Client } from "@grpc/grpc-js";
 import { answerAndSpeakRealtime } from "./speak";
+import { msFromPcmBytes, sleep } from "./utils";
 
 config();
-
-dotenv.config();
 
 const FRAME_LENGTH = 512;
 const DEVICE_INDEX = 3;
@@ -17,8 +13,11 @@ const SENSITIVITY = 0.5;
 const REFRACTORY_MS = 750; //prevents the wake word from being called multiple times
 const KEYWORD = BuiltinKeyword.COMPUTER;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 const SAMPLE_RATE = 16000;
+
+enum Mode { Wake, Converse }
 
 export async function start() {
     const ACCESS_KEY = process.env.PICOVOICE_ACCESS_KEY;
@@ -231,7 +230,7 @@ async function handleSpeechWithPvRecorder(recorder: PvRecorder): Promise<string>
                         if (ws.readyState === WebSocket.OPEN) {
                             // Convert Int16Array to Buffer for base64 encoding
                             const buffer = Buffer.from(frame.buffer);
-                            audioMsSent += msFromPcmBytes(buffer.length);
+                            audioMsSent += msFromPcmBytes(buffer.length, SAMPLE_RATE);
 
                             ws.send(JSON.stringify({
                                 type: "input_audio_buffer.append",
@@ -257,8 +256,9 @@ async function handleSpeechWithPvRecorder(recorder: PvRecorder): Promise<string>
 async function handleTranscript(transcript: string) {
     console.log("🤖 Would process:", transcript);
 
-    await answerAndSpeakRealtime(transcript);
+    await answerAndSpeakRealtime(transcript, OPENAI_API_KEY);
 }
+
 
 
 if (require.main === module) {
@@ -266,14 +266,4 @@ if (require.main === module) {
         console.error("❌ Startup failed:", e);
         process.exit(1);
     });
-}
-
-function msFromPcmBytes(bytes: number, sr = SAMPLE_RATE) {
-    const samples = bytes / 2;            // 16-bit mono
-    return (samples / sr) * 1000;
-}
-
-
-function sleep(ms: number) {
-    return new Promise<void>((r) => setTimeout(r, ms));
 }

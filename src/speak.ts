@@ -1,22 +1,19 @@
-//this streams the vopice frames from the server to the client
+//this file handles streaming the voice frames from the LLM server to the client
 
-import * as dotenv from "dotenv";
 import WebSocket from "ws";
 import { spawn } from "node:child_process";
+import { config } from "dotenv";
 
-dotenv.config();
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
+config();
 
 
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
 const ALSA_DEVICE = "plughw:4,0"
 
-// We’ll request raw PCM16 at 24 kHz mono so we can pipe to aplay.
+// raw PCM16 at 24 kHz mono so we can pipe to aplay
 const OUT_SAMPLE_RATE = 24000;
 
-export async function answerAndSpeakRealtime(transcript: string): Promise<void> {
+export async function answerAndSpeakRealtime(transcript: string, OPENAI_API_KEY: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
         const url = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
         const ws = new WebSocket(url, {
