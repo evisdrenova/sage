@@ -1,9 +1,8 @@
 import { Porcupine, BuiltinKeyword } from "@picovoice/porcupine-node";
 import { PvRecorder } from "@picovoice/pvrecorder-node";
-import WebSocket, { OPEN } from "ws";
 import { config } from "dotenv";
 import { answerAndSpeakRealtime, transcribeOnceFromRecorder } from "./speak";
-import { msFromPcmBytes, sleep } from "./utils";
+import { sleep } from "./utils";
 import { SessionTimer } from "./timer";
 
 config();
@@ -93,26 +92,32 @@ async function converse(
 
     console.log("🗣️ Conversation mode (no wake word needed) — I'm listening…");
 
-
-
     const sessionTimer = new SessionTimer(sessionIdleMs);
 
     while (!sessionTimer.isExpired()) {
+        // If audio is playing, just wait. Don't do ANYTHING else.
         if (IS_PLAYING_AUDIO) {
-            console.log("Waiting for audio playback to finish...");
-            sessionTimer.pause(); // Pause timer during audio playback
+            console.log("🔇 Audio is playing, waiting...");
+            sessionTimer.pause();
 
             while (IS_PLAYING_AUDIO) {
                 await sleep(100);
             }
 
-            sessionTimer.resume(); // Resume timer after audio
+            // Audio finished, wait a bit more for echoes to die down
+            console.log("⏳ Audio finished, waiting 2 seconds for echoes...");
+            await sleep(2000);
 
-            console.log(`Post-audio delay (${postAudioDelayMs}ms)...`);
-            await sleep(postAudioDelayMs);
+            sessionTimer.resume();
         }
 
-        console.log(`Ready to listen... (${sessionTimer.getRemainingMs()}ms remaining)`);
+        console.log(`👂 Ready to listen... (${sessionTimer.getRemainingMs()}ms remaining)`);
+
+        // Only transcribe if we're NOT playing audio
+        if (IS_PLAYING_AUDIO) {
+            console.log("🔇 Audio started during setup, skipping transcription");
+            continue;
+        }
 
         const transcript = await transcribeOnceFromRecorder(recorder, IS_PLAYING_AUDIO, {
             silenceMs: turnSilenceMs,
@@ -120,29 +125,34 @@ async function converse(
         });
 
         if (!transcript) {
-            console.log("no transcript - session ending");
+            console.log("🔇 No transcript - session ending");
             break;
         }
 
-        // Reset timer on successful transcription
         sessionTimer.reset();
 
         if (/^(stop|goodbye|thanks|that's all|that is all)\b/i.test(transcript)) {
-            console.log("👋 Ending conversation on user cue.");
+            console.log("👋 Ending conversation");
             break;
         }
 
         console.log("👤 You:", transcript);
 
-        // Pause timer during response
+        // Set audio state and play response
         sessionTimer.pause();
-        setAudioPlayingState(true);
-        await answerAndSpeakRealtime(transcript);
-        setAudioPlayingState(false);
-        sessionTimer.resume();
+        IS_PLAYING_AUDIO = true;
+        console.log("🔊 Audio playback started");
+
+        try {
+            await answerAndSpeakRealtime(transcript);
+        } finally {
+            IS_PLAYING_AUDIO = false;
+            console.log("🔇 Audio playback stopped");
+            sessionTimer.resume();
+        }
     }
 
-    console.log("↩️ Returning to wake mode.");
+    console.log("↩️ Returning to wake mode");
 }
 
 export function setAudioPlayingState(playing: boolean) {

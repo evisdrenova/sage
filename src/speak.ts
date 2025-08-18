@@ -20,7 +20,6 @@ const OUT_SAMPLE_RATE = 24000;
 
 export async function answerAndSpeakRealtime(transcript: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-
         const url = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
         const ws = new WebSocket(url, {
             headers: {
@@ -31,9 +30,21 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
         let aplay: ReturnType<typeof spawn> | null = null;
         let startedAudio = false;
+        let audioStreamComplete = false;
+        let aplayFinished = false;
+
+        const checkComplete = () => {
+            if (audioStreamComplete && aplayFinished) {
+                console.log("✅ Audio playback complete");
+                resolve();
+            }
+        };
 
         const openAplay = () => {
             if (aplay) return;
+
+            console.log("🎵 Starting audio playback...");
+
             aplay = spawn("aplay", [
                 "-q",
                 "-D", ALSA_DEVICE,
@@ -41,14 +52,19 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                 "-c", "1",
                 "-r", String(OUT_SAMPLE_RATE),
                 "-t", "raw",
-            ]);
-            aplay.on("close", (code) => {
-                if (code && code !== 0) {
-                    console.warn("aplay exited with code:", code);
-                }
+            ], {
+                stdio: ['pipe', 'ignore', 'ignore']
             });
+
+            aplay.on("close", (code) => {
+                console.log(`🎵 aplay finished (code: ${code})`);
+                aplayFinished = true;
+                checkComplete();
+            });
+
             aplay.on("error", (err) => {
                 console.error("aplay error:", err);
+                aplayFinished = true;
                 safeClose();
                 reject(err);
             });
@@ -56,24 +72,20 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
         const safeClose = () => {
             try { if (aplay?.stdin && !aplay.stdin.destroyed) aplay.stdin.end(); } catch { }
-            try { if (aplay && aplay.pid) aplay.kill("SIGTERM"); } catch { }
+            try { if (aplay && aplay.pid) aplay.kill("SIGINT"); } catch { }
             try { if (ws.readyState === WebSocket.OPEN) ws.close(); } catch { }
         };
 
         ws.on("open", () => {
-            // 1) Configure the session (optional—can also set per response)
             ws.send(JSON.stringify({
                 type: "session.update",
                 session: {
                     modalities: ["audio", "text"],
-                    // default output format for this connection
                     output_audio_format: "pcm16",
-                    // default voice for this connection
                     voice: "alloy",
                 },
             }));
 
-            // 2) Add the user's message
             ws.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: {
@@ -83,13 +95,11 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                 },
             }));
 
-            // 3) Ask the model to respond with audio (override session defaults if you want)
             ws.send(JSON.stringify({
                 type: "response.create",
                 response: {
                     modalities: ["audio", "text"],
                     instructions: "Answer concisely for spoken playback. Keep the answer to less than 2 sentences.",
-                    // ✅ audio config belongs here, not as response.audio
                     output_audio_format: "pcm16",
                     voice: "alloy"
                 },
@@ -101,7 +111,6 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
             const t = evt.type as string;
 
             switch (t) {
-                // Streamed PCM16 audio chunks (base64). Write to aplay stdin.
                 case "response.audio.delta": {
                     if (!startedAudio) {
                         openAplay();
@@ -109,21 +118,21 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                     }
                     const b64 = evt.delta as string;
                     const buf = Buffer.from(b64, "base64");
+
                     if (aplay?.stdin?.writable) aplay.stdin.write(buf);
                     break;
                 }
 
-                // Optional textual deltas if you want to log partial text:
-                case "response.output_text.delta": {
-                    console.log(evt.delta);
-                    break;
-                }
-
-                // Signals the model finished speaking; close audio & socket.
                 case "response.completed":
                 case "response.audio.done": {
-                    if (aplay?.stdin?.writable) aplay.stdin.end();
-                    resolve();
+                    console.log("🎵 Audio stream complete");
+                    audioStreamComplete = true;
+
+                    if (aplay?.stdin?.writable) {
+                        aplay.stdin.end();
+                    }
+
+                    checkComplete();
                     break;
                 }
 
@@ -133,23 +142,27 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
                     reject(new Error(evt.error?.message || "Realtime error"));
                     break;
                 }
-
-                default:
-                    // Uncomment to inspect all events:
-                    // console.log("evt:", t);
-                    break;
             }
         });
 
         ws.on("close", () => {
-            // If we never got audio, still resolve so your app can continue.
-            if (!startedAudio) resolve();
+            if (!startedAudio) {
+                resolve();
+            }
         });
 
         ws.on("error", (e) => {
             safeClose();
             reject(e);
         });
+
+        setTimeout(() => {
+            if (!audioStreamComplete || !aplayFinished) {
+                console.warn("⚠️ Audio timeout");
+                safeClose();
+                resolve();
+            }
+        }, 30000);
     });
 }
 
@@ -165,9 +178,8 @@ export async function transcribeOnceFromRecorder(
     return new Promise((resolve, reject) => {
 
         if (isPlayingAudio) {
-            console.log("🔇 Skipping transcription - audio is playing");
-            resolve("");
-            return;
+            console.log("🔇 Audio is playing, not transcribing");
+            return "";
         }
 
 
