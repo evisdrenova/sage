@@ -70,7 +70,6 @@ export async function start() {
                     mode = Mode.Converse
                     await converse(recorder);
                     mode = Mode.Wake
-                    // recorder = await pauseAndHandle(recorder);
                 }
             }
         }
@@ -82,19 +81,18 @@ export async function start() {
     }
 }
 
-
 async function converse(
     recorder: PvRecorder,
 ) {
     const sessionIdleMs = 12000;
     const turnSilenceMs = 800;
-    const postAudioDelayMs = 100;
 
     console.log("🗣️ Conversation mode (no wake word needed) — I'm listening…");
 
     const sessionTimer = new SessionTimer(sessionIdleMs);
 
     while (!sessionTimer.isExpired()) {
+
         // If audio is playing, just wait. Don't do ANYTHING else.
         if (IS_PLAYING_AUDIO) {
             console.log("🔇 Audio is playing, waiting...");
@@ -131,17 +129,11 @@ async function converse(
 
         sessionTimer.reset();
 
-        if (/^(stop|goodbye|thanks|that's all|that is all)\b/i.test(transcript)) {
-            console.log("👋 Ending conversation");
-            break;
-        }
-
-        console.log("👤 You:", transcript);
-
         // Set audio state and play response
         sessionTimer.pause();
         IS_PLAYING_AUDIO = true;
         console.log("🔊 Audio playback started");
+        recorder.stop()
 
         try {
             await answerAndSpeakRealtime(transcript);
@@ -149,6 +141,7 @@ async function converse(
             IS_PLAYING_AUDIO = false;
             console.log("🔇 Audio playback stopped");
             sessionTimer.resume();
+            recorder.start()
         }
     }
 

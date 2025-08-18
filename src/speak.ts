@@ -241,7 +241,7 @@ export async function transcribeOnceFromRecorder(
 
         ws.on("open", () => {
 
-            console.log("🌐 Realtime connected");
+            console.log("websocket opened");
 
             ws.send(JSON.stringify({
                 type: "session.update",
@@ -261,9 +261,6 @@ export async function transcribeOnceFromRecorder(
                 },
             }));
         });
-
-        console.log("web socket ready?", ws.readyState === WebSocket.OPEN)
-
 
         // handle server events
         ws.on("message", async (raw) => {
