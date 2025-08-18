@@ -66,7 +66,7 @@ export async function start() {
                     if (now - lastDetect < REFRACTORY_MS) continue;
                     lastDetect = now;
 
-                    console.log("🔵 Wake word detected!");
+                    console.log("Wake word detected!");
                     mode = Mode.Converse
                     await converse(recorder);
                     mode = Mode.Wake
@@ -74,7 +74,7 @@ export async function start() {
             }
         }
     } catch (err) {
-        console.error("❌ Error:", err);
+        console.error("Error:", err);
         throw err;
     } finally {
         await shutdown();
@@ -93,28 +93,19 @@ async function converse(
 
     while (!sessionTimer.isExpired()) {
 
-        // If audio is playing, just wait. Don't do ANYTHING else.
+        // If audio is playing, just wait
         if (IS_PLAYING_AUDIO) {
-            console.log("🔇 Audio is playing, waiting...");
+            console.log("Audio is playing, waiting...");
             sessionTimer.pause();
 
             while (IS_PLAYING_AUDIO) {
                 await sleep(100);
             }
 
-            // Audio finished, wait a bit more for echoes to die down
-            console.log("⏳ Audio finished, waiting 2 seconds for echoes...");
+            console.log("Audio finished, waiting 2 seconds for echoes...");
             await sleep(2000);
 
             sessionTimer.resume();
-        }
-
-        console.log(`👂 Ready to listen... (${sessionTimer.getRemainingMs()}ms remaining)`);
-
-        // Only transcribe if we're NOT playing audio
-        if (IS_PLAYING_AUDIO) {
-            console.log("🔇 Audio started during setup, skipping transcription");
-            continue;
         }
 
         const transcript = await transcribeOnceFromRecorder(recorder, IS_PLAYING_AUDIO, {
@@ -123,7 +114,7 @@ async function converse(
         });
 
         if (!transcript) {
-            console.log("🔇 No transcript - session ending");
+            console.log("No transcript - session ending");
             break;
         }
 
@@ -132,30 +123,30 @@ async function converse(
         // Set audio state and play response
         sessionTimer.pause();
         IS_PLAYING_AUDIO = true;
-        console.log("🔊 Audio playback started");
+        console.log("Audio playback started");
         recorder.stop()
 
         try {
             await answerAndSpeakRealtime(transcript);
         } finally {
             IS_PLAYING_AUDIO = false;
-            console.log("🔇 Audio playback stopped");
+            console.log("Audio playback stopped");
             sessionTimer.resume();
             recorder.start()
         }
     }
 
-    console.log("↩️ Returning to wake mode");
+    console.log("↩Returning to wake mode");
 }
 
 export function setAudioPlayingState(playing: boolean) {
     IS_PLAYING_AUDIO = playing;
-    console.log(playing ? "🔊 Audio playback started" : "🔇 Audio playback stopped");
+    console.log(playing ? "Audio playback started" : "Audio playback stopped");
 }
 
 if (require.main === module) {
     start().catch((e) => {
-        console.error("❌ Startup failed:", e);
+        console.error("Startup failed:", e);
         process.exit(1);
     });
 }

@@ -35,7 +35,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
         const checkComplete = () => {
             if (audioStreamComplete && aplayFinished) {
-                console.log("✅ Audio playback complete");
+                console.log("Audio playback complete");
                 resolve();
             }
         };
@@ -43,7 +43,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
         const openAplay = () => {
             if (aplay) return;
 
-            console.log("🎵 Starting audio playback...");
+            console.log("Starting audio playback...");
 
             aplay = spawn("aplay", [
                 "-q",
@@ -57,7 +57,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
             });
 
             aplay.on("close", (code) => {
-                console.log(`🎵 aplay finished (code: ${code})`);
+                console.log(`aplay finished (code: ${code})`);
                 aplayFinished = true;
                 checkComplete();
             });
@@ -125,7 +125,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
                 case "response.completed":
                 case "response.audio.done": {
-                    console.log("🎵 Audio stream complete");
+                    console.log("Audio stream complete");
                     audioStreamComplete = true;
 
                     if (aplay?.stdin?.writable) {
@@ -158,7 +158,7 @@ export async function answerAndSpeakRealtime(transcript: string): Promise<void> 
 
         setTimeout(() => {
             if (!audioStreamComplete || !aplayFinished) {
-                console.warn("⚠️ Audio timeout");
+                console.warn("Audio timeout");
                 safeClose();
                 resolve();
             }
@@ -178,7 +178,7 @@ export async function transcribeOnceFromRecorder(
     return new Promise((resolve, reject) => {
 
         if (isPlayingAudio) {
-            console.log("🔇 Audio is playing, not transcribing");
+            console.log("Audio is playing, not transcribing");
             return "";
         }
 
@@ -211,7 +211,7 @@ export async function transcribeOnceFromRecorder(
 
 
         const captureLoop = async () => {
-            console.log("🎤 Starting capture loop...");
+            console.log("Starting capture loop...");
             captureLoopRunning = true;
 
             try {
@@ -231,18 +231,15 @@ export async function transcribeOnceFromRecorder(
                     }
                 }
             } catch (error) {
-                console.error("❌ Capture loop error:", error);
+                console.error("Capture loop error:", error);
             } finally {
                 captureLoopRunning = false;
-                console.log("🛑 Capture loop ended");
+                console.log("Capture loop ended");
             }
         }
 
 
         ws.on("open", () => {
-
-            console.log("websocket opened");
-
             ws.send(JSON.stringify({
                 type: "session.update",
                 session: {
@@ -268,10 +265,8 @@ export async function transcribeOnceFromRecorder(
             const t = evt.type as string;
             switch (t) {
                 case "session.updated": {
-                    // Start pushing frames right away
                     isCapturingSpeech = true;
 
-                    // Start the capture loop ONLY after session is ready
                     if (!captureLoopRunning) {
                         captureLoop();
                     }
@@ -279,18 +274,17 @@ export async function transcribeOnceFromRecorder(
                 }
 
                 case "input_audio_buffer.speech_started":
-                    console.log("🗣️ Speech detected by server");
+                    console.log("Speech detected by server");
                     break;
 
                 case "input_audio_buffer.speech_stopped":
                     // Stop sending and finalize this utterance
                     console.log("speech stopped event sent")
                     isCapturingSpeech = false;
-                    // ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
                     break;
 
                 case "input_audio_buffer.committed":
-                    console.log("📦 Buffer committed, waiting for transcription...");
+                    console.log("Buffer committed, waiting for transcription...");
                     break;
 
                 case "conversation.item.input_audio_transcription.completed":
@@ -299,7 +293,7 @@ export async function transcribeOnceFromRecorder(
                     const finalText = evt.transcript || evt.text || "";
                     transcriptDone = true;
                     clearTimeout(overallTO);
-                    console.log("📝 Transcription:", JSON.stringify(finalText));
+                    console.log("Transcription:", JSON.stringify(finalText));
                     cleanup();
                     resolve((finalText || "").trim());
                     break;
@@ -308,7 +302,7 @@ export async function transcribeOnceFromRecorder(
                 case "conversation.item.created":
                     const item = evt.item || {};
                     if (item.type === "message" && item.role === "user") {
-                        console.log("💭 Processing transcription...");
+                        console.log("Processing transcription...");
                     }
                     break;
 
