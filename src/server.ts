@@ -1,7 +1,7 @@
 import { Porcupine, BuiltinKeyword } from "@picovoice/porcupine-node";
 import { PvRecorder } from "@picovoice/pvrecorder-node";
 import { config } from "dotenv";
-import { answerAndSpeakRealtime, transcribeOnceFromRecorder } from "./speak";
+import { speak, transcribe } from "./speak";
 import { sleep } from "./utils";
 import { SessionTimer } from "./timer";
 
@@ -93,7 +93,6 @@ async function converse(
 
     while (!sessionTimer.isExpired()) {
 
-        // If audio is playing, just wait
         if (IS_PLAYING_AUDIO) {
             console.log("Audio is playing, waiting...");
             sessionTimer.pause();
@@ -108,7 +107,7 @@ async function converse(
             sessionTimer.resume();
         }
 
-        const transcript = await transcribeOnceFromRecorder(recorder, IS_PLAYING_AUDIO, {
+        const transcript = await transcribe(recorder, IS_PLAYING_AUDIO, {
             silenceMs: turnSilenceMs,
             maxOverallMs: Math.min(sessionTimer.getRemainingMs(), sessionIdleMs),
         });
@@ -120,14 +119,13 @@ async function converse(
 
         sessionTimer.reset();
 
-        // Set audio state and play response
         sessionTimer.pause();
         IS_PLAYING_AUDIO = true;
         console.log("Audio playback started");
         recorder.stop()
 
         try {
-            await answerAndSpeakRealtime(transcript);
+            await speak(transcript);
         } finally {
             IS_PLAYING_AUDIO = false;
             console.log("Audio playback stopped");

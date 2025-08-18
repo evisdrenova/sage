@@ -15,7 +15,7 @@ export class SessionTimer {
         if (!this.isPaused) {
             this.updateRemaining();
             this.isPaused = true;
-            console.log(`⏸️ Session timer paused (${this.remainingMs}ms remaining)`);
+            console.log(`⏸Session timer paused (${this.remainingMs}ms remaining)`);
         }
     }
 
@@ -23,7 +23,7 @@ export class SessionTimer {
         if (this.isPaused) {
             this.isPaused = false;
             this.lastCheckTime = Date.now();
-            console.log(`▶️ Session timer resumed (${this.remainingMs}ms remaining)`);
+            console.log(`▶Session timer resumed (${this.remainingMs}ms remaining)`);
         }
     }
 
