@@ -3,11 +3,13 @@ import { spawn } from "node:child_process";
 import { config } from "dotenv";
 import { PvRecorder } from "@picovoice/pvrecorder-node";
 import { msFromPcmBytes } from "./utils";
+import { Composio } from '@composio/core'
 
 config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
+
 const SAMPLE_RATE = 16000;
 const ALSA_DEVICE = "plughw:4,0"
 const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
@@ -183,6 +185,21 @@ export async function transcribe(
                 "OpenAI-Beta": "realtime=v1",
             },
         });
+
+        const composio = new Composio({
+            apiKey: process.env.COMPOSIO ?? '',
+        });
+
+        async function ConnectGmail() {
+            
+            const userEmail = "evisdrenova@gmail.com";
+
+            const connectionRequest = await composio.connectedAccounts.initiate(
+                userEmail,
+                "ac_qi2jWASNriLv"
+            );
+        }
+
 
         let isCapturingSpeech = false;
         let transcriptDone = false;
