@@ -186,21 +186,6 @@ export async function transcribe(
             },
         });
 
-        const composio = new Composio({
-            apiKey: process.env.COMPOSIO ?? '',
-        });
-
-        async function ConnectGmail() {
-            
-            const userEmail = "evisdrenova@gmail.com";
-
-            const connectionRequest = await composio.connectedAccounts.initiate(
-                userEmail,
-                "ac_qi2jWASNriLv"
-            );
-        }
-
-
         let isCapturingSpeech = false;
         let transcriptDone = false;
         let audioMsSent = 0;
