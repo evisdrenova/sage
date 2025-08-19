@@ -251,6 +251,9 @@ export async function transcribe(
                         prefix_padding_ms: 300,
                         silence_duration_ms: silenceMs,
                     },
+                    tools: [
+
+                    ]
                 },
             }));
         });
