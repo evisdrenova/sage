@@ -211,6 +211,8 @@ export async function speak(transcript: string): Promise<void> {
             try { if (ws.readyState === WebSocket.OPEN) ws.close(); } catch { }
         };
 
+        const tools = [weatherToolSchema];
+
         ws.on("open", () => {
             // Session config: audio out + text; model can call tools
             ws.send(
@@ -236,7 +238,6 @@ export async function speak(transcript: string): Promise<void> {
                 })
             );
 
-            // Ask the model to answer concisely and allow tool use
             ws.send(
                 JSON.stringify({
                     type: "response.create",
@@ -246,7 +247,8 @@ export async function speak(transcript: string): Promise<void> {
                             "Answer concisely for spoken playback (<= 2 sentences). If the user asks about current weather, call `get_weather`.",
                         output_audio_format: "pcm16",
                         voice: "alloy",
-                        tools: [weatherToolSchema], // <-- register the tool
+                        tool_choice: 'auto',
+                        tools
                     },
                 })
             );
@@ -437,7 +439,6 @@ export async function transcribe(
                         prefix_padding_ms: 300,
                         silence_duration_ms: silenceMs,
                     },
-                    tools: tools
                 },
             }));
         });
