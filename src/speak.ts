@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { config } from "dotenv";
 import { PvRecorder } from "@picovoice/pvrecorder-node";
 import { msFromPcmBytes } from "./utils";
-import { Composio } from '@composio/core'
+import { runWeatherTool, weatherToolSchema } from "./tools";
 
 config();
 
@@ -15,9 +15,157 @@ const ALSA_DEVICE = "plughw:4,0"
 const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
 const OUT_SAMPLE_RATE = 24000;
 
+// export async function speak(transcript: string): Promise<void> {
+//     return new Promise<void>((resolve, reject) => {
+//         const ws = new WebSocket(url, {
+//             headers: {
+//                 Authorization: `Bearer ${OPENAI_API_KEY}`,
+//                 "OpenAI-Beta": "realtime=v1",
+//             },
+//         });
+
+//         let aplay: ReturnType<typeof spawn> | null = null;
+//         let startedAudio = false;
+//         let audioStreamComplete = false;
+//         let aplayFinished = false;
+
+//         const checkComplete = () => {
+//             if (audioStreamComplete && aplayFinished) {
+//                 console.log("Audio playback complete");
+//                 resolve();
+//             }
+//         };
+
+//         const openAplay = () => {
+//             if (aplay) return;
+
+//             console.log("Starting audio playback...");
+
+//             aplay = spawn("aplay", [
+//                 "-q",
+//                 "-D", ALSA_DEVICE,
+//                 "-f", "S16_LE",
+//                 "-c", "1",
+//                 "-r", String(OUT_SAMPLE_RATE),
+//                 "-t", "raw",
+//             ], {
+//                 stdio: ['pipe', 'ignore', 'ignore']
+//             });
+
+//             aplay.on("close", (code) => {
+//                 console.log(`aplay finished (code: ${code})`);
+//                 aplayFinished = true;
+//                 checkComplete();
+//             });
+
+//             aplay.on("error", (err) => {
+//                 console.error("aplay error:", err);
+//                 aplayFinished = true;
+//                 safeClose();
+//                 reject(err);
+//             });
+//         };
+
+//         const safeClose = () => {
+//             try { if (aplay?.stdin && !aplay.stdin.destroyed) aplay.stdin.end(); } catch { }
+//             try { if (aplay && aplay.pid) aplay.kill("SIGINT"); } catch { }
+//             try { if (ws.readyState === WebSocket.OPEN) ws.close(); } catch { }
+//         };
+
+//         ws.on("open", () => {
+//             ws.send(JSON.stringify({
+//                 type: "session.update",
+//                 session: {
+//                     modalities: ["audio", "text"],
+//                     output_audio_format: "pcm16",
+//                     voice: "alloy",
+//                 },
+//             }));
+
+//             ws.send(JSON.stringify({
+//                 type: "conversation.item.create",
+//                 item: {
+//                     type: "message",
+//                     role: "user",
+//                     content: [{ type: "input_text", text: transcript }],
+//                 },
+//             }));
+
+//             ws.send(JSON.stringify({
+//                 type: "response.create",
+//                 response: {
+//                     modalities: ["audio", "text"],
+//                     instructions: "Answer concisely for spoken playback. Keep the answer to less than 2 sentences.",
+//                     output_audio_format: "pcm16",
+//                     voice: "alloy"
+//                 },
+//             }));
+//         });
+
+//         ws.on("message", (raw) => {
+//             const evt = JSON.parse(raw.toString());
+//             const t = evt.type as string;
+
+//             switch (t) {
+//                 case "response.audio.delta": {
+//                     if (!startedAudio) {
+//                         openAplay();
+//                         startedAudio = true;
+//                     }
+//                     const b64 = evt.delta as string;
+//                     const buf = Buffer.from(b64, "base64");
+
+//                     if (aplay?.stdin?.writable) aplay.stdin.write(buf);
+//                     break;
+//                 }
+
+//                 case "response.completed":
+//                 case "response.audio.done": {
+//                     console.log("Audio stream complete");
+//                     audioStreamComplete = true;
+
+//                     if (aplay?.stdin?.writable) {
+//                         aplay.stdin.end();
+//                     }
+
+//                     checkComplete();
+//                     break;
+//                 }
+
+//                 case "error": {
+//                     console.error("Realtime error:", evt.error);
+//                     safeClose();
+//                     reject(new Error(evt.error?.message || "Realtime error"));
+//                     break;
+//                 }
+//             }
+//         });
+
+//         ws.on("close", () => {
+//             if (!startedAudio) {
+//                 resolve();
+//             }
+//         });
+
+//         ws.on("error", (e) => {
+//             safeClose();
+//             reject(e);
+//         });
+
+//         setTimeout(() => {
+//             if (!audioStreamComplete || !aplayFinished) {
+//                 console.warn("Audio timeout");
+//                 safeClose();
+//                 resolve();
+//             }
+//         }, 30000);
+//     });
+// }
+
+
 export async function speak(transcript: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(url, {
+        const ws = new WebSocket(url, "realtime", {
             headers: {
                 Authorization: `Bearer ${OPENAI_API_KEY}`,
                 "OpenAI-Beta": "realtime=v1",
@@ -38,26 +186,17 @@ export async function speak(transcript: string): Promise<void> {
 
         const openAplay = () => {
             if (aplay) return;
-
-            console.log("Starting audio playback...");
-
-            aplay = spawn("aplay", [
-                "-q",
-                "-D", ALSA_DEVICE,
-                "-f", "S16_LE",
-                "-c", "1",
-                "-r", String(OUT_SAMPLE_RATE),
-                "-t", "raw",
-            ], {
-                stdio: ['pipe', 'ignore', 'ignore']
-            });
-
+            console.log("Starting audio playback…");
+            aplay = spawn(
+                "aplay",
+                ["-q", "-D", ALSA_DEVICE, "-f", "S16_LE", "-c", "1", "-r", String(OUT_SAMPLE_RATE), "-t", "raw"],
+                { stdio: ["pipe", "ignore", "ignore"] }
+            );
             aplay.on("close", (code) => {
                 console.log(`aplay finished (code: ${code})`);
                 aplayFinished = true;
                 checkComplete();
             });
-
             aplay.on("error", (err) => {
                 console.error("aplay error:", err);
                 aplayFinished = true;
@@ -73,40 +212,83 @@ export async function speak(transcript: string): Promise<void> {
         };
 
         ws.on("open", () => {
-            ws.send(JSON.stringify({
-                type: "session.update",
-                session: {
-                    modalities: ["audio", "text"],
-                    output_audio_format: "pcm16",
-                    voice: "alloy",
-                },
-            }));
+            // Session config: audio out + text; model can call tools
+            ws.send(
+                JSON.stringify({
+                    type: "session.update",
+                    session: {
+                        modalities: ["audio", "text"],
+                        output_audio_format: "pcm16",
+                        voice: "alloy",
+                    },
+                })
+            );
 
-            ws.send(JSON.stringify({
-                type: "conversation.item.create",
-                item: {
-                    type: "message",
-                    role: "user",
-                    content: [{ type: "input_text", text: transcript }],
-                },
-            }));
+            // Provide user's message
+            ws.send(
+                JSON.stringify({
+                    type: "conversation.item.create",
+                    item: {
+                        type: "message",
+                        role: "user",
+                        content: [{ type: "input_text", text: transcript }],
+                    },
+                })
+            );
 
-            ws.send(JSON.stringify({
-                type: "response.create",
-                response: {
-                    modalities: ["audio", "text"],
-                    instructions: "Answer concisely for spoken playback. Keep the answer to less than 2 sentences.",
-                    output_audio_format: "pcm16",
-                    voice: "alloy"
-                },
-            }));
+            // Ask the model to answer concisely and allow tool use
+            ws.send(
+                JSON.stringify({
+                    type: "response.create",
+                    response: {
+                        modalities: ["audio", "text"],
+                        instructions:
+                            "Answer concisely for spoken playback (<= 2 sentences). If the user asks about current weather, call `get_weather`.",
+                        output_audio_format: "pcm16",
+                        voice: "alloy",
+                        tools: [weatherToolSchema], // <-- register the tool
+                    },
+                })
+            );
         });
 
-        ws.on("message", (raw) => {
+        ws.on("message", async (raw) => {
             const evt = JSON.parse(raw.toString());
             const t = evt.type as string;
 
             switch (t) {
+                // ---------- TOOL CALL HANDLING ----------
+                case "response.tool_call": {
+                    // The model wants us to run a tool
+                    const { id: tool_call_id, name, arguments: args } = evt;
+                    try {
+                        let output: any = null;
+                        if (name === "get_weather") {
+                            output = await runWeatherTool(args || {});
+                        } else {
+                            output = { ok: false, error: `Unknown tool: ${name}` };
+                        }
+                        // Send the tool output back so the model can continue its reasoning/answer
+                        ws.send(
+                            JSON.stringify({
+                                type: "response.tool_output",
+                                tool_call_id,
+                                output,
+                            })
+                        );
+                    } catch (e: any) {
+                        ws.send(
+                            JSON.stringify({
+                                type: "response.tool_output",
+                                tool_call_id,
+                                output: { ok: false, error: e?.message || "Tool failed" },
+                            })
+                        );
+                    }
+                    break;
+                }
+
+                // ---------- AUDIO STREAM ----------
                 case "response.audio.delta": {
                     if (!startedAudio) {
                         openAplay();
@@ -114,37 +296,40 @@ export async function speak(transcript: string): Promise<void> {
                     }
                     const b64 = evt.delta as string;
                     const buf = Buffer.from(b64, "base64");
-
                     if (aplay?.stdin?.writable) aplay.stdin.write(buf);
                     break;
                 }
 
-                case "response.completed":
-                case "response.audio.done": {
-                    console.log("Audio stream complete");
+                case "response.audio.done":
+                case "response.completed": {
+                    // Model finished producing output
                     audioStreamComplete = true;
-
-                    if (aplay?.stdin?.writable) {
-                        aplay.stdin.end();
-                    }
-
+                    if (aplay?.stdin?.writable) aplay.stdin.end();
                     checkComplete();
                     break;
                 }
 
+                // ---------- OPTIONAL: text deltas if you want to log ----------
+                case "response.output_text.delta":
+                    // process.stdout.write(evt.delta); // uncomment to see text stream in console
+                    break;
+
+                // ---------- ERRORS ----------
                 case "error": {
                     console.error("Realtime error:", evt.error);
                     safeClose();
                     reject(new Error(evt.error?.message || "Realtime error"));
                     break;
                 }
+
+                default:
+                    // console.log("evt:", t, evt);
+                    break;
             }
         });
 
         ws.on("close", () => {
-            if (!startedAudio) {
-                resolve();
-            }
+            if (!startedAudio) resolve();
         });
 
         ws.on("error", (e) => {
@@ -152,6 +337,7 @@ export async function speak(transcript: string): Promise<void> {
             reject(e);
         });
 
+        // Safety timeout
         setTimeout(() => {
             if (!audioStreamComplete || !aplayFinished) {
                 console.warn("Audio timeout");
@@ -251,9 +437,7 @@ export async function transcribe(
                         prefix_padding_ms: 300,
                         silence_duration_ms: silenceMs,
                     },
-                    tools: [
-
-                    ]
+                    tools: tools
                 },
             }));
         });
