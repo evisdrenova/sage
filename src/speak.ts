@@ -177,10 +177,10 @@ export async function speak(transcript: string): Promise<void> {
         let audioStreamComplete = false;
         let aplayFinished = false;
 
-        // function-call streaming state
-        let pendingToolId: string | null = null;     // item.id from response.output_item.added
-        let pendingToolName: string | null = null;   // item.name
-        let pendingArgsText = "";                    // accumulate JSON chars
+        // state for function-call streaming
+        let pendingCallId: string | null = null;    // <-- use call_id from events
+        let pendingToolName: string | null = null;
+        let pendingArgsText = "";
 
         const tools = [weatherToolSchema];
 
@@ -189,7 +189,8 @@ export async function speak(transcript: string): Promise<void> {
         };
         const openAplay = () => {
             if (aplay) return;
-            aplay = spawn("aplay",
+            aplay = spawn(
+                "aplay",
                 ["-q", "-D", ALSA_DEVICE, "-f", "S16_LE", "-c", "1", "-r", String(OUT_SAMPLE_RATE), "-t", "raw"],
                 { stdio: ["pipe", "ignore", "ignore"] }
             );
@@ -203,19 +204,19 @@ export async function speak(transcript: string): Promise<void> {
         };
 
         ws.on("open", () => {
-            // session config
+            // Configure session
             ws.send(JSON.stringify({
                 type: "session.update",
                 session: { modalities: ["audio", "text"], output_audio_format: "pcm16", voice: "alloy" }
             }));
 
-            // user message
+            // Add the user message
             ws.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: { type: "message", role: "user", content: [{ type: "input_text", text: transcript }] }
             }));
 
-            // ask model to answer and allow tool use
+            // Ask model to respond (with tools available)
             ws.send(JSON.stringify({
                 type: "response.create",
                 response: {
@@ -231,135 +232,122 @@ export async function speak(transcript: string): Promise<void> {
 
         ws.on("message", async (raw) => {
             const evt = JSON.parse(raw.toString());
-            const type = evt.type as string;
-            // console.log("event:", type);
+            const t = evt.type as string;
+            console.log("event:", t, evt);
 
-            switch (type) {
-                // ---------- NEW function-call streaming path ----------
+            switch (t) {
+                // A new output item was added (may be a function call)
                 case "response.output_item.added": {
-                    // A new output item was added (could be text, tool call, etc.)
                     const item = evt.item;
                     if (item?.type === "function_call") {
-                        pendingToolId = item.id;
-                        pendingToolName = item.name;
+                        // Prefer a call_id if present on the item
+                        pendingCallId = item.call_id ?? item.id ?? null;
+                        pendingToolName = item.name ?? null;
                         pendingArgsText = "";
                     }
                     break;
                 }
+
+                // Arguments stream for the function call
                 case "response.function_call_arguments.delta": {
-                    // Chunks of JSON arguments
+                    // Authoritative call_id comes from this event
+                    if (evt.call_id) pendingCallId = evt.call_id;
                     pendingArgsText += evt.delta || "";
                     break;
                 }
-                case "response.function_call_arguments.done": {
-                    // We have full JSON args — run the tool
-                    if (!pendingToolId || !pendingToolName) break;
-                    let parsed: any = {};
-                    try { parsed = pendingArgsText ? JSON.parse(pendingArgsText) : {}; }
-                    catch { parsed = {}; }
 
+                case "response.function_call_arguments.done": {
+                    // Make sure we have the exact call_id from the function-call stream
+                    if (evt.call_id) pendingCallId = evt.call_id;
+
+                    if (!pendingCallId || !pendingToolName) {
+                        console.warn("⚠️ Missing call_id or tool name; cannot return tool output.");
+                        break;
+                    }
+
+                    // Parse arguments
+                    let args: any = {};
+                    try { args = pendingArgsText ? JSON.parse(pendingArgsText) : {}; }
+                    catch { args = {}; }
+
+                    // Run tool
+                    let output: any;
                     try {
-                        let output: any;
                         if (pendingToolName === "get_weather") {
-                            output = await runWeatherTool(parsed);
+                            output = await runWeatherTool(args);
                         } else {
                             output = { ok: false, error: `Unknown tool: ${pendingToolName}` };
                         }
-
-                        // Send tool output back
-                        ws.send(JSON.stringify({
-                            type: "response.tool_output",
-                            tool_call_id: pendingToolId,
-                            output
-                        }));
-
-                        // IMPORTANT: the original response likely already ended (you saw `response.done`).
-                        // Ask the model to continue and produce the final audio/text:
-                        ws.send(JSON.stringify({
-                            type: "response.create",
-                            response: {
-                                modalities: ["audio", "text"],
-                                instructions: "Use the provided tool result and reply briefly for spoken playback.",
-                                output_audio_format: "pcm16",
-                                voice: "alloy"
-                            }
-                        }));
-                    } finally {
-                        // clear pending state
-                        pendingToolId = null;
-                        pendingToolName = null;
-                        pendingArgsText = "";
+                    } catch (e: any) {
+                        output = { ok: false, error: e?.message || "Tool failed" };
                     }
+
+                    // ✅ Return output using the SAME call_id from the function call
+                    ws.send(JSON.stringify({
+                        type: "conversation.item.create",
+                        item: {
+                            type: "function_call_output",
+                            call_id: pendingCallId,                 // <-- IMPORTANT
+                            output: JSON.stringify(output)          // must be a string
+                        }
+                    }));
+
+                    // Then ask the model to continue and speak the result
+                    ws.send(JSON.stringify({
+                        type: "response.create",
+                        response: {
+                            modalities: ["audio", "text"],
+                            instructions: "Use the provided tool result and reply briefly for spoken playback.",
+                            output_audio_format: "pcm16",
+                            voice: "alloy"
+                        }
+                    }));
+
+                    // clear state
+                    pendingCallId = null;
+                    pendingToolName = null;
+                    pendingArgsText = "";
                     break;
                 }
 
-                // ---------- Back-compat: older single-shot tool event ----------
+                // (Optional) older single-shot tool path; keep for compatibility
                 case "response.tool_call": {
-                    const { id: tool_call_id, name, arguments: args } = evt;
+                    const { id, name, arguments: args } = evt;
+                    let output: any;
                     try {
-                        let output: any;
                         if (name === "get_weather") output = await runWeatherTool(args || {});
                         else output = { ok: false, error: `Unknown tool: ${name}` };
-
-                        ws.send(JSON.stringify({ type: "response.tool_output", tool_call_id, output }));
-                        ws.send(JSON.stringify({
-                            type: "response.create",
-                            response: {
-                                modalities: ["audio", "text"],
-                                instructions: "Use the provided tool result and reply briefly for spoken playback.",
-                                output_audio_format: "pcm16",
-                                voice: "alloy"
-                            }
-                        }));
                     } catch (e: any) {
-                        ws.send(JSON.stringify({ type: "response.tool_output", tool_call_id, output: { ok: false, error: e?.message || "Tool failed" } }));
+                        output = { ok: false, error: e?.message || "Tool failed" };
                     }
+
+                    ws.send(JSON.stringify({
+                        type: "conversation.item.create",
+                        item: {
+                            type: "function_call_output",
+                            call_id: id,                            // older path uses this id
+                            output: JSON.stringify(output)
+                        }
+                    }));
+                    ws.send(JSON.stringify({
+                        type: "response.create",
+                        response: {
+                            modalities: ["audio", "text"],
+                            instructions: "Use the provided tool result and reply briefly for spoken playback.",
+                            output_audio_format: "pcm16",
+                            voice: "alloy"
+                        }
+                    }));
                     break;
                 }
 
-                // ---------- Audio streaming ----------
-                case "response.audio.delta": {
-                    if (!startedAudio) { openAplay(); startedAudio = true; }
-                    const buf = Buffer.from(evt.delta as string, "base64");
-                    if (aplay?.stdin?.writable) aplay.stdin.write(buf);
-                    break;
-                }
-                case "response.audio.done":
-                case "response.completed": {
-                    audioStreamComplete = true;
-                    if (aplay?.stdin?.writable) aplay.stdin.end();
-                    checkComplete();
-                    break;
-                }
-
-                // ---------- Optional text stream ----------
-                case "response.output_text.delta":
-                    // process.stdout.write(evt.delta);
-                    break;
-
-                // ---------- Errors ----------
-                case "error": {
-                    console.error("Realtime error:", evt.error);
-                    safeClose();
-                    reject(new Error(evt.error?.message || "Realtime error"));
-                    break;
-                }
-
-                default:
-                    // console.log(type, evt);
-                    break;
+                // …keep your audio/text/error cases unchanged…
             }
         });
 
-        ws.on("close", () => {
-            if (!startedAudio) resolve();
-        });
-        ws.on("error", (e) => {
-            safeClose();
-            reject(e);
-        });
+        ws.on("close", () => { if (!startedAudio) resolve(); });
+        ws.on("error", (e) => { safeClose(); reject(e); });
 
-        // Safety timeout
         setTimeout(() => {
             if (!audioStreamComplete || !aplayFinished) {
                 console.warn("Audio timeout");
