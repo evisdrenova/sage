@@ -162,6 +162,7 @@ const OUT_SAMPLE_RATE = 24000;
 //     });
 // }
 
+// unable to retrieve the weather for SF right now, need to figure out whats going on with tht tool call - probably not wired up correctly
 
 export async function speak(transcript: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -177,16 +178,19 @@ export async function speak(transcript: string): Promise<void> {
         let audioStreamComplete = false;
         let aplayFinished = false;
 
-        // state for function-call streaming
-        let pendingCallId: string | null = null;    // <-- use call_id from events
+        // function-call streaming state
+        let pendingCallId: string | null = null;
         let pendingToolName: string | null = null;
         let pendingArgsText = "";
 
         const tools = [weatherToolSchema];
 
         const checkComplete = () => {
-            if (audioStreamComplete && aplayFinished) resolve();
+            if (audioStreamComplete && aplayFinished) {
+                resolve();
+            }
         };
+
         const openAplay = () => {
             if (aplay) return;
             aplay = spawn(
@@ -194,9 +198,17 @@ export async function speak(transcript: string): Promise<void> {
                 ["-q", "-D", ALSA_DEVICE, "-f", "S16_LE", "-c", "1", "-r", String(OUT_SAMPLE_RATE), "-t", "raw"],
                 { stdio: ["pipe", "ignore", "ignore"] }
             );
-            aplay.on("close", () => { aplayFinished = true; checkComplete(); });
-            aplay.on("error", (err) => { aplayFinished = true; safeClose(); reject(err); });
+            aplay.on("close", () => {
+                aplayFinished = true;
+                checkComplete();
+            });
+            aplay.on("error", (err) => {
+                aplayFinished = true;
+                safeClose();
+                reject(err);
+            });
         };
+
         const safeClose = () => {
             try { if (aplay?.stdin && !aplay.stdin.destroyed) aplay.stdin.end(); } catch { }
             try { if (aplay && aplay.pid) aplay.kill("SIGINT"); } catch { }
@@ -204,19 +216,19 @@ export async function speak(transcript: string): Promise<void> {
         };
 
         ws.on("open", () => {
-            // Configure session
+            // Configure session (audio out + text)
             ws.send(JSON.stringify({
                 type: "session.update",
                 session: { modalities: ["audio", "text"], output_audio_format: "pcm16", voice: "alloy" }
             }));
 
-            // Add the user message
+            // User message
             ws.send(JSON.stringify({
                 type: "conversation.item.create",
                 item: { type: "message", role: "user", content: [{ type: "input_text", text: transcript }] }
             }));
 
-            // Ask model to respond (with tools available)
+            // Ask for response (allow tool use)
             ws.send(JSON.stringify({
                 type: "response.create",
                 response: {
@@ -233,44 +245,33 @@ export async function speak(transcript: string): Promise<void> {
         ws.on("message", async (raw) => {
             const evt = JSON.parse(raw.toString());
             const t = evt.type as string;
-            console.log("event:", t, evt);
+            // console.log("event:", t);
 
             switch (t) {
-                // A new output item was added (may be a function call)
+                // ===== FUNCTION-CALL (streaming) =====
                 case "response.output_item.added": {
                     const item = evt.item;
                     if (item?.type === "function_call") {
-                        // Prefer a call_id if present on the item
                         pendingCallId = item.call_id ?? item.id ?? null;
                         pendingToolName = item.name ?? null;
                         pendingArgsText = "";
                     }
                     break;
                 }
-
-                // Arguments stream for the function call
                 case "response.function_call_arguments.delta": {
-                    // Authoritative call_id comes from this event
                     if (evt.call_id) pendingCallId = evt.call_id;
                     pendingArgsText += evt.delta || "";
                     break;
                 }
-
                 case "response.function_call_arguments.done": {
-                    // Make sure we have the exact call_id from the function-call stream
                     if (evt.call_id) pendingCallId = evt.call_id;
+                    if (!pendingCallId || !pendingToolName) break;
 
-                    if (!pendingCallId || !pendingToolName) {
-                        console.warn("⚠️ Missing call_id or tool name; cannot return tool output.");
-                        break;
-                    }
-
-                    // Parse arguments
+                    // parse args
                     let args: any = {};
-                    try { args = pendingArgsText ? JSON.parse(pendingArgsText) : {}; }
-                    catch { args = {}; }
+                    try { args = pendingArgsText ? JSON.parse(pendingArgsText) : {}; } catch { args = {}; }
 
-                    // Run tool
+                    // run tool
                     let output: any;
                     try {
                         if (pendingToolName === "get_weather") {
@@ -282,17 +283,17 @@ export async function speak(transcript: string): Promise<void> {
                         output = { ok: false, error: e?.message || "Tool failed" };
                     }
 
-                    // ✅ Return output using the SAME call_id from the function call
+                    // return tool result as function_call_output
                     ws.send(JSON.stringify({
                         type: "conversation.item.create",
                         item: {
                             type: "function_call_output",
-                            call_id: pendingCallId,                 // <-- IMPORTANT
-                            output: JSON.stringify(output)          // must be a string
+                            call_id: pendingCallId,
+                            output: JSON.stringify(output)
                         }
                     }));
 
-                    // Then ask the model to continue and speak the result
+                    // now ask the model to continue & speak the result
                     ws.send(JSON.stringify({
                         type: "response.create",
                         response: {
@@ -310,7 +311,7 @@ export async function speak(transcript: string): Promise<void> {
                     break;
                 }
 
-                // (Optional) older single-shot tool path; keep for compatibility
+                // ===== (Optional) older one-shot tool event =====
                 case "response.tool_call": {
                     const { id, name, arguments: args } = evt;
                     let output: any;
@@ -325,7 +326,7 @@ export async function speak(transcript: string): Promise<void> {
                         type: "conversation.item.create",
                         item: {
                             type: "function_call_output",
-                            call_id: id,                            // older path uses this id
+                            call_id: id,
                             output: JSON.stringify(output)
                         }
                     }));
@@ -341,13 +342,43 @@ export async function speak(transcript: string): Promise<void> {
                     break;
                 }
 
-                // …keep your audio/text/error cases unchanged…
+                // ===== AUDIO STREAM =====
+                case "response.audio.delta": {
+                    if (!startedAudio) { openAplay(); startedAudio = true; }
+                    const buf = Buffer.from(evt.delta as string, "base64");
+                    if (aplay?.stdin?.writable) aplay.stdin.write(buf);
+                    break;
+                }
+                case "response.audio.done":
+                case "response.completed": {
+                    audioStreamComplete = true;
+                    if (aplay?.stdin?.writable) aplay.stdin.end();
+                    checkComplete();
+                    break;
+                }
+
+                // ===== OPTIONAL TEXT STREAM =====
+                case "response.output_text.delta":
+                    // process.stdout.write(evt.delta);
+                    break;
+
+                // ===== ERRORS =====
+                case "error": {
+                    console.error("Realtime error:", evt.error);
+                    safeClose();
+                    reject(new Error(evt.error?.message || "Realtime error"));
+                    break;
+                }
+
+                default:
+                    break;
             }
         });
 
         ws.on("close", () => { if (!startedAudio) resolve(); });
         ws.on("error", (e) => { safeClose(); reject(e); });
 
+        // Safety timeout to avoid hanging forever
         setTimeout(() => {
             if (!audioStreamComplete || !aplayFinished) {
                 console.warn("Audio timeout");
