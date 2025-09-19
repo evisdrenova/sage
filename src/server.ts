@@ -414,6 +414,7 @@ async function converseWithRealtime(recorder: PvRecorder, {
     let lastRxAt = Date.now();
     let audioReceived = false;
 
+    // triggered when there is new audio ready to play to the user
     session.on("audio", (evt) => {
         const size = evt.data?.byteLength ?? 0;
         lastRxAt = Date.now();
@@ -429,51 +430,60 @@ async function converseWithRealtime(recorder: PvRecorder, {
 
     console.log("2 - Audio handler set");
 
-    session.on("text", (evt) => {
-        if (evt.delta) process.stdout.write(`📝 ${evt.delta}`);
-        if (evt.done) process.stdout.write("\n");
+    // session.on("text", (evt) => {
+    //     if (evt.delta) process.stdout.write(`📝 ${evt.delta}`);
+    //     if (evt.done) process.stdout.write("\n");
+    // });
+
+    session.on("audio_start", (evt) => {
+        console.log("agent is starting to generate audio", evt)
+    });
+
+
+    session.on("error", (evt) => {
+        console.log("there was an error", evt)
     });
 
     // Add more event listeners for debugging
-    session.on("connected", () => {
-        console.log("✅ Session connected successfully");
+    session.on("transport_event", (evt) => {
+        console.log("new event", evt);
     });
 
-    session.on("response.created", () => {
-        console.log("🤖 Agent is creating response");
-    });
+    // session.on("response.created", () => {
+    //     console.log("🤖 Agent is creating response");
+    // });
 
-    session.on("response.done", () => {
-        console.log("✅ Agent response complete");
-    });
+    // session.on("response.done", () => {
+    //     console.log("✅ Agent response complete");
+    // });
 
-    session.on("input_audio_buffer.speech_started", () => {
-        console.log("🎤 Speech detected by server VAD!");
-    });
+    // session.on("input_audio_buffer.speech_started", () => {
+    //     console.log("🎤 Speech detected by server VAD!");
+    // });
 
-    session.on("input_audio_buffer.speech_stopped", () => {
-        console.log("🤐 Speech ended by server VAD");
-    });
+    // session.on("input_audio_buffer.speech_stopped", () => {
+    //     console.log("🤐 Speech ended by server VAD");
+    // });
 
-    session.on("conversation.item.created", (evt) => {
-        console.log("📄 New conversation item:", evt.type);
-    });
+    // session.on("conversation.item.created", (evt) => {
+    //     console.log("📄 New conversation item:", evt.type);
+    // });
 
     console.log("3 - Event listeners set");
 
     let active = true;
-    session.on("disconnect", () => {
-        console.log("❌ Session disconnected");
-        active = false;
-    });
+    // session.on("disconnect", () => {
+    //     console.log("❌ Session disconnected");
+    //     active = false;
+    // });
     session.on("error", (err) => {
         console.error("❌ Session error:", err);
         active = false;
     });
-    session.on("close", () => {
-        console.log("❌ Session closed");
-        active = false;
-    });
+    // session.on("close", () => {
+    //     console.log("❌ Session closed");
+    //     active = false;
+    // });
 
     const hb = setInterval(() => {
         console.log(`❤️ active=${active} framesSent=${framesSent} bytesSent=${bytesSent} audioRx=${audioReceived}`);
