@@ -161,7 +161,7 @@ if (require.main === module) {
 
 const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
 
-const SAMPLE_RATE = 16000;
+const SAMPLE_RATE = 24000;
 const ALSA_DEVICE = "plughw:4,0"
 
 // async function converseWithRealtime(recorder: PvRecorder, {
@@ -339,8 +339,6 @@ const ALSA_DEVICE = "plughw:4,0"
 
 
 const MODEL = "gpt-4o-realtime-preview-2024-12-17";
-const MIC_DEVICE = -1;          // -1 = default device; or set your index
-
 
 
 function tightArrayBufferOf(int16Array: Int16Array): ArrayBuffer {
@@ -366,7 +364,7 @@ async function converseWithRealtime(recorder: PvRecorder, {
         transport: "websocket",
         model: MODEL,
         config: {
-            outputModalities: ["audio", "text"],
+            outputModalities: ["audio"],
             audio: {
                 input: {
                     turnDetection: {
@@ -430,11 +428,6 @@ async function converseWithRealtime(recorder: PvRecorder, {
 
     console.log("2 - Audio handler set");
 
-    // session.on("text", (evt) => {
-    //     if (evt.delta) process.stdout.write(`📝 ${evt.delta}`);
-    //     if (evt.done) process.stdout.write("\n");
-    // });
-
     session.on("audio_start", (evt) => {
         console.log("agent is starting to generate audio", evt)
     });
@@ -444,46 +437,15 @@ async function converseWithRealtime(recorder: PvRecorder, {
         console.log("there was an error", evt)
     });
 
-    // Add more event listeners for debugging
-    session.on("transport_event", (evt) => {
-        console.log("new event", evt);
-    });
-
-    // session.on("response.created", () => {
-    //     console.log("🤖 Agent is creating response");
-    // });
-
-    // session.on("response.done", () => {
-    //     console.log("✅ Agent response complete");
-    // });
-
-    // session.on("input_audio_buffer.speech_started", () => {
-    //     console.log("🎤 Speech detected by server VAD!");
-    // });
-
-    // session.on("input_audio_buffer.speech_stopped", () => {
-    //     console.log("🤐 Speech ended by server VAD");
-    // });
-
-    // session.on("conversation.item.created", (evt) => {
-    //     console.log("📄 New conversation item:", evt.type);
-    // });
 
     console.log("3 - Event listeners set");
 
     let active = true;
-    // session.on("disconnect", () => {
-    //     console.log("❌ Session disconnected");
-    //     active = false;
-    // });
+
     session.on("error", (err) => {
         console.error("❌ Session error:", err);
         active = false;
     });
-    // session.on("close", () => {
-    //     console.log("❌ Session closed");
-    //     active = false;
-    // });
 
     const hb = setInterval(() => {
         console.log(`❤️ active=${active} framesSent=${framesSent} bytesSent=${bytesSent} audioRx=${audioReceived}`);
@@ -611,163 +573,3 @@ async function converseWithRealtime(recorder: PvRecorder, {
         }
     }
 }
-
-// async function converseWithRealtime(recorder: PvRecorder, {
-//     vadThreshold = 0.5,
-//     silenceMs = 600,
-//     sessionIdleMs = 12000,
-// } = {}): Promise<void> {
-//     const agent = new RealtimeAgent({
-//         name: "Voice Assistant",
-//         instructions: "You are a helpful voice assistant. Be brief, friendly, and respond clearly.",
-//         voice: "alloy",
-//         modalities: ["audio", "text"],
-//         turnDetection: {
-//             type: "server_vad",
-//             threshold: vadThreshold,
-//             silenceDurationMs: silenceMs,
-//             prefixPaddingMs: 300,
-//         },
-//         outputAudioFormat: "pcm16",
-//     });
-
-//     const session = new RealtimeSession(agent, {
-//         transport: "websocket",
-//         model: "gpt-4o-realtime-preview-2024-12-17", // Use the actual model name
-//     });
-
-//     // Audio output handling (PCM16 from OpenAI -> ALSA)
-//     let aplay: ReturnType<typeof spawn> | null = null;
-//     let conversationActive = true;
-
-//     const ensureAplay = () => {
-//         if (aplay) return;
-//         aplay = spawn("aplay", [
-//             "-q",
-//             "-D", ALSA_DEVICE,
-//             "-f", "S16_LE",
-//             "-c", "1",
-//             "-r", String(SAMPLE_RATE),
-//             "-t", "raw",
-//         ], { stdio: ["pipe", "ignore", "ignore"] });
-
-//         aplay.on("close", () => {
-//             aplay = null;
-//         });
-//         aplay.on("error", (err) => {
-//             console.error("ALSA playback error:", err);
-//             aplay = null;
-//         });
-//     };
-
-//     // Handle audio output from OpenAI
-//     session.on("audio", (event) => {
-//         // event.data is an ArrayBuffer of PCM16 mono @ 16kHz
-//         ensureAplay();
-//         if (!aplay?.stdin?.writable) return;
-
-//         const buffer = Buffer.from(event.data);
-//         aplay.stdin.write(buffer);
-//     });
-
-//     // Optional: Handle text responses for logging
-//     session.on("text", (event) => {
-//         if (event.delta) {
-//             process.stdout.write(event.delta);
-//         }
-//         if (event.done) {
-//             process.stdout.write("\n");
-//         }
-//     });
-
-//     // Handle session events
-//     session.on("connected", () => {
-//         console.log("🔗 Connected to OpenAI Realtime API");
-//     });
-
-//     session.on("disconnected", () => {
-//         console.log("❌ Disconnected from OpenAI");
-//         conversationActive = false;
-//     });
-
-//     session.on("error", (error) => {
-//         console.error("❌ Session error:", error);
-//         conversationActive = false;
-//     });
-
-//     try {
-//         // Connect to OpenAI
-//         await session.connect({ apiKey: OPENAI_API_KEY });
-//         console.log("🎙️ Listening... speak when ready");
-
-//         // Audio input loop: stream from PvRecorder to OpenAI
-//         let isStreaming = true;
-
-//         const streamAudio = async () => {
-//             while (isStreaming && conversationActive && recorder.isRecording && session.isConnected()) {
-//                 try {
-//                     const frame = await recorder.read(); // Int16Array
-
-//                     // Convert Int16Array to ArrayBuffer
-//                     // PvRecorder returns Int16Array, we need ArrayBuffer
-//                     const arrayBuffer = frame.buffer.slice(
-//                         frame.byteOffset,
-//                         frame.byteOffset + frame.byteLength
-//                     );
-
-//                     session.sendAudio(arrayBuffer);
-
-//                     // Small delay to prevent overwhelming the connection
-//                     await new Promise(resolve => setTimeout(resolve, 5));
-
-//                 } catch (error) {
-//                     console.error("Audio streaming error:", error);
-//                     break;
-//                 }
-//             }
-//         };
-
-//         // Start audio streaming
-//         streamAudio();
-
-//         // Wait for conversation to end or timeout
-//         await new Promise<void>((resolve) => {
-//             const timeout = setTimeout(() => {
-//                 console.log("⏱️ Conversation timeout");
-//                 isStreaming = false;
-//                 conversationActive = false;
-//                 resolve();
-//             }, sessionIdleMs);
-
-//             session.on("disconnected", () => {
-//                 clearTimeout(timeout);
-//                 isStreaming = false;
-//                 resolve();
-//             });
-
-//             // You could also listen for specific conversation end events
-//             // depending on what the SDK provides
-//         });
-
-//     } catch (error) {
-//         console.error("Connection error:", error);
-//     } finally {
-//         // Cleanup
-//         conversationActive = false;
-
-//         if (aplay) {
-//             try {
-//                 aplay.stdin?.end();
-//                 aplay.kill("SIGTERM");
-//             } catch (error) {
-//                 console.error("Error closing audio output:", error);
-//             }
-//         }
-
-//         try {
-//             await session.disconnect();
-//         } catch (error) {
-//             console.error("Error disconnecting session:", error);
-//         }
-//     }
-// }
