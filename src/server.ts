@@ -394,8 +394,8 @@ async function cleanUpStream(
     }
 
     try {
-        if (session.disconnect) {
-            await session.disconnect();
+        if (session) {
+            await session.close();
             console.log("🔌 Session disconnected");
         }
     } catch (err) {
