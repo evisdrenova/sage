@@ -4,9 +4,7 @@ import { config } from "dotenv";
 import { speak, transcribe } from "./speak";
 import { sleep } from "./utils";
 import { SessionTimer } from "./timer";
-
-import WebSocket from "ws";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from 'child_process';
 
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 
@@ -15,9 +13,13 @@ config();
 const FRAME_LENGTH = 512;
 const DEVICE_INDEX = 3;
 const SENSITIVITY = 0.5;
-const REFRACTORY_MS = 750; //prevents the wake word from being called multiple times
+const REFRACTORY_MS = 750;
 const KEYWORD = BuiltinKeyword.COMPUTER;
 let IS_PLAYING_AUDIO = false;
+const SAMPLE_RATE = 24000;
+const ALSA_DEVICE = "plughw:4,0"
+const MODEL = "gpt-4o-realtime-preview-2024-12-17";
+
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
@@ -73,8 +75,7 @@ export async function start() {
 
                     console.log("Wake word detected!");
                     mode = Mode.Converse
-                    // await converse(recorder);
-                    await converseWithRealtime(recorder, {
+                    await converse(recorder, {
                         vadThreshold: 0.5,
                         silenceMs: 800,
                         sessionIdleMs: 12000,
@@ -91,7 +92,7 @@ export async function start() {
     }
 }
 
-async function converse(
+async function converseOld(
     recorder: PvRecorder,
 ) {
     const sessionIdleMs = 12000;
@@ -152,193 +153,6 @@ export function setAudioPlayingState(playing: boolean) {
     console.log(playing ? "Audio playback started" : "Audio playback stopped");
 }
 
-if (require.main === module) {
-    start().catch((e) => {
-        console.error("Startup failed:", e);
-        process.exit(1);
-    });
-}
-
-const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
-
-const SAMPLE_RATE = 24000;
-const ALSA_DEVICE = "plughw:4,0"
-
-// async function converseWithRealtime(recorder: PvRecorder, {
-//     vadThreshold = 0.5,
-//     silenceMs = 600,
-//     sessionIdleMs = 12000,
-// } = {}): Promise<void> {
-
-//     const agent = new RealtimeAgent({
-//         name: 'Greeter',
-//         instructions: 'Greet the user with cheer and answer questions.',
-//     });
-
-
-//     const ws = new WebSocket(url, "realtime", {
-//         headers: {
-//             Authorization: `Bearer ${OPENAI_API_KEY}`,
-//             "OpenAI-Beta": "realtime=v1",
-//         },
-//     });
-
-//     let sending = false;
-//     let closed = false;
-//     let aplay: ReturnType<typeof spawn> | null = null;
-//     let aplayDone = false;
-//     let responseDone = false;
-
-//     const openAplay = () => {
-//         if (aplay) return;
-//         aplay = spawn("aplay", [
-//             "-q",
-//             "-D", ALSA_DEVICE,
-//             "-f", "S16_LE",
-//             "-c", "1",
-//             "-r", String(SAMPLE_RATE),
-//             "-t", "raw",
-//         ], { stdio: ["pipe", "ignore", "ignore"] });
-
-//         aplay.on("close", () => { aplayDone = true; maybeFinish(); });
-//         aplay.on("error", () => { aplayDone = true; maybeFinish(); });
-//     };
-
-//     const safeClose = () => {
-//         if (closed) return;
-//         closed = true;
-//         try { aplay?.stdin?.end(); } catch { }
-//         try { if (aplay && aplay.pid) aplay.kill("SIGINT"); } catch { }
-//         try { if (ws.readyState === WebSocket.OPEN) ws.close(); } catch { }
-//     };
-
-//     const maybeFinish = () => {
-//         if (responseDone && (aplayDone || !aplay)) {
-//             safeClose();
-//         }
-//     };
-
-//     // 1) When WS opens, configure session
-//     ws.on("open", () => {
-//         ws.send(JSON.stringify({
-//             type: "session.update",
-//             session: {
-//                 // let the model manage turns and speaking:
-//                 modalities: ["audio", "text"],
-//                 output_audio_format: "pcm16",
-//                 voice: "alloy",
-//                 turn_detection: {
-//                     type: "server_vad",
-//                     threshold: vadThreshold,
-//                     prefix_padding_ms: 300,
-//                     silence_duration_ms: silenceMs,
-//                 },
-//                 // optional: keep the session from idling immediately
-//                 // keep_alive: "15s"
-//             },
-//         }));
-
-//         // kick off a response “turn”; the model will listen for audio
-//         ws.send(JSON.stringify({
-//             type: "response.create",
-//             response: {
-//                 modalities: ["audio", "text"],
-//                 instructions: "You are a voice assistant. Be brief and helpful.",
-//             },
-//         }));
-//     });
-
-//     // 2) Handle server events
-//     ws.on("message", async (raw) => {
-//         const evt = JSON.parse(raw.toString());
-//         const t = evt.type as string;
-
-//         switch (t) {
-//             case "session.updated":
-//                 // start streaming mic frames now
-//                 sending = true;
-//                 streamMic().catch(() => { });
-//                 break;
-
-//             case "input_audio_buffer.speech_started":
-//                 // optional logging
-//                 break;
-
-//             case "input_audio_buffer.speech_stopped":
-//                 // stop sending; the server will finish this turn
-//                 sending = false;
-//                 // You can optionally commit, but server VAD commits implicitly:
-//                 // ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-//                 break;
-
-//             case "response.output_text.delta":
-//                 // optional: accumulate text for logs
-//                 // process.stdout.write(evt.delta);
-//                 break;
-
-//             case "response.audio.delta": {
-//                 // stream PCM16 audio to ALSA
-//                 openAplay();
-//                 const b64 = evt.delta as string;
-//                 const buf = Buffer.from(b64, "base64");
-//                 if (aplay?.stdin?.writable) aplay.stdin.write(buf);
-//                 break;
-//             }
-
-//             case "response.audio.done":
-//             case "response.completed":
-//                 responseDone = true;
-//                 if (aplay?.stdin?.writable) aplay.stdin.end();
-//                 maybeFinish();
-//                 break;
-
-//             case "rate_limits.updated":
-//                 break;
-
-//             case "error":
-//                 console.error("Realtime error:", evt.error);
-//                 safeClose();
-//                 break;
-
-//             default:
-//                 // console.log("evt:", t, evt);
-//                 break;
-//         }
-//     });
-
-//     ws.on("close", () => {
-//         aplayDone = true;
-//     });
-
-//     ws.on("error", (e) => {
-//         console.error("WS error:", e);
-//         safeClose();
-//     });
-
-//     // 3) Mic → server loop (PCM16 base64)
-//     async function streamMic() {
-//         try {
-//             while (!closed && ws.readyState === WebSocket.OPEN) {
-//                 if (!sending || !recorder.isRecording) {
-//                     // light sleep to avoid tight spin when paused
-//                     await sleep(10);
-//                     continue;
-//                 }
-//                 const frame = await recorder.read();              // Int16Array length 512
-//                 const buf = Buffer.from(frame.buffer);            // raw PCM16LE
-//                 ws.send(JSON.stringify({
-//                     type: "input_audio_buffer.append",
-//                     audio: buf.toString("base64"),
-//                 }));
-//             }
-//         } catch (e) {
-//             // recorder stopped or ws closed
-//         }
-//     }
-// }
-
-
-const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 
 
 function tightArrayBufferOf(int16Array: Int16Array): ArrayBuffer {
@@ -348,7 +162,7 @@ function tightArrayBufferOf(int16Array: Int16Array): ArrayBuffer {
     view.set(int16Array);
     return buffer;
 }
-async function converseWithRealtime(recorder: PvRecorder, {
+async function converse(recorder: PvRecorder, {
     vadThreshold = 0.5,
     silenceMs = 600,
     sessionIdleMs = 12000,
@@ -356,7 +170,7 @@ async function converseWithRealtime(recorder: PvRecorder, {
 
     const agent = new RealtimeAgent({
         name: "Assistant",
-        instructions: "You are a helpful voice assistant. Be concise and friendly.",
+        instructions: "You are a helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
     });
 
     // Configure session for audio in/out and server-side VAD
@@ -385,7 +199,8 @@ async function converseWithRealtime(recorder: PvRecorder, {
     console.log("1 - Session configured");
 
     // ---- audio OUT (agent -> ALSA) ----
-    let aplay: ReturnType<typeof spawn> | null = null;
+    let aplay: ChildProcess | null = null;
+
     const ensureAplay = () => {
         if (aplay) return;
         aplay = spawn("aplay", [
@@ -458,16 +273,16 @@ async function converseWithRealtime(recorder: PvRecorder, {
 
     console.log("4 - Heartbeat started");
 
+    const mic = new PvRecorder(FRAME_LENGTH, DEVICE_INDEX);
+
     try {
         // Connect the session
         await session.connect({ apiKey: OPENAI_API_KEY });
         console.log("5 - Connected to OpenAI");
 
         // Start mic
-        const mic = new PvRecorder(FRAME_LENGTH, DEVICE_INDEX);
         await mic.start();
         console.log("🎙️ Mic started — speak when ready");
-        console.log("6 - Mic initialized");
 
         // Give a moment for connection to stabilize
         await sleep(1000);
@@ -538,7 +353,17 @@ async function converseWithRealtime(recorder: PvRecorder, {
     } finally {
         console.log("🧹 Cleaning up...");
         clearInterval(hb);
+        await cleanUpStream(mic, aplay, session)
+    }
+}
 
+async function cleanUpStream(
+    mic: PvRecorder | null,
+    aplay: ChildProcess | null,
+    session: RealtimeSession<unknown>
+) {
+
+    if (mic) {
         try {
             await mic.stop();
             mic.release();
@@ -546,9 +371,11 @@ async function converseWithRealtime(recorder: PvRecorder, {
         } catch (err) {
             console.error("Error stopping mic:", err);
         }
+    }
 
+    if (aplay) {
         try {
-            if (aplay?.stdin) {
+            if (aplay.stdin?.writable) {
                 aplay.stdin.end();
                 console.log("🔊 aplay stdin ended");
             }
@@ -557,19 +384,29 @@ async function converseWithRealtime(recorder: PvRecorder, {
         }
 
         try {
-            if (aplay && aplay.pid) {
+            if (aplay.pid) {
                 aplay.kill("SIGTERM");
                 console.log("🔊 aplay process killed");
             }
         } catch (err) {
             console.error("Error killing aplay:", err);
         }
-
-        try {
-            await session.disconnect?.();
-            console.log("🔌 Session disconnected");
-        } catch (err) {
-            console.error("Error disconnecting session:", err);
-        }
     }
+
+    try {
+        if (session.disconnect) {
+            await session.disconnect();
+            console.log("🔌 Session disconnected");
+        }
+    } catch (err) {
+        console.error("Error disconnecting session:", err);
+    }
+}
+
+
+if (require.main === module) {
+    start().catch((e) => {
+        console.error("Startup failed:", e);
+        process.exit(1);
+    });
 }
