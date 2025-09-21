@@ -181,8 +181,6 @@ async function converse(): Promise<void> {
         },
     });
 
-    console.log("1 - Session configured");
-
     // ---- audio OUT (agent -> ALSA) ----
     let aplay: ChildProcess | null = null;
 
@@ -226,8 +224,6 @@ async function converse(): Promise<void> {
         }
     });
 
-    console.log("2 - Audio handler set");
-
     session.on("audio_start", (evt) => {
         console.log("agent is starting to generate audio", evt)
     });
@@ -237,8 +233,6 @@ async function converse(): Promise<void> {
         console.log("there was an error", evt)
     });
 
-
-    console.log("3 - Event listeners set");
 
     let active = true;
 
@@ -256,18 +250,15 @@ async function converse(): Promise<void> {
         }
     }, 5000);
 
-    console.log("4 - Heartbeat started");
-
     const mic = new PvRecorder(FRAME_LENGTH, DEVICE_INDEX);
 
     try {
         // Connect the session
         await session.connect({ apiKey: OPENAI_API_KEY });
-        console.log("5 - Connected to OpenAI");
 
         // Start mic
         await mic.start();
-        console.log("🎙️ Mic started — speak when ready");
+        console.log("Mic started — speak when ready");
 
         // Give a moment for connection to stabilize
         await sleep(1000);
