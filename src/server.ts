@@ -15,11 +15,13 @@ const DEVICE_INDEX = 3;
 const SENSITIVITY = 0.5;
 const REFRACTORY_MS = 750;
 const KEYWORD = BuiltinKeyword.COMPUTER;
-let IS_PLAYING_AUDIO = false;
 const SAMPLE_RATE = 24000;
 const ALSA_DEVICE = "plughw:4,0"
 const MODEL = "gpt-4o-realtime-preview-2024-12-17";
+const VAD_THRESHOLD = 0.5
+const SILENCE_MS = 600
 
+let IS_PLAYING_AUDIO = false;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
@@ -75,11 +77,7 @@ export async function start() {
 
                     console.log("Wake word detected!");
                     mode = Mode.Converse
-                    await converse(recorder, {
-                        vadThreshold: 0.5,
-                        silenceMs: 800,
-                        sessionIdleMs: 12000,
-                    });
+                    await converse();
                     mode = Mode.Wake
                 }
             }
@@ -153,20 +151,7 @@ export function setAudioPlayingState(playing: boolean) {
     console.log(playing ? "Audio playback started" : "Audio playback stopped");
 }
 
-
-
-function tightArrayBufferOf(int16Array: Int16Array): ArrayBuffer {
-    // Create a new ArrayBuffer with exact size needed
-    const buffer = new ArrayBuffer(int16Array.length * 2); // 2 bytes per Int16
-    const view = new Int16Array(buffer);
-    view.set(int16Array);
-    return buffer;
-}
-async function converse(recorder: PvRecorder, {
-    vadThreshold = 0.5,
-    silenceMs = 600,
-    sessionIdleMs = 12000,
-} = {}): Promise<void> {
+async function converse(): Promise<void> {
 
     const agent = new RealtimeAgent({
         name: "Assistant",
@@ -183,9 +168,9 @@ async function converse(recorder: PvRecorder, {
                 input: {
                     turnDetection: {
                         type: "server_vad",
-                        threshold: vadThreshold,
+                        threshold: VAD_THRESHOLD,
                         prefix_padding_ms: 300,
-                        silence_duration_ms: silenceMs,
+                        silence_duration_ms: SILENCE_MS,
                     },
                 },
                 output: {
@@ -314,8 +299,7 @@ async function converse(recorder: PvRecorder, {
             }
             const avg = sum / frame.length;
 
-            // Convert to ArrayBuffer properly
-            const abuf = tightArrayBufferOf(frame);
+            const abuf = converAudioToArrayBuffer(frame);
 
             // Send to OpenAI
             session.sendAudio(abuf);
@@ -401,6 +385,14 @@ async function cleanUpStream(
     } catch (err) {
         console.error("Error disconnecting session:", err);
     }
+}
+
+
+function converAudioToArrayBuffer(int16Array: Int16Array): ArrayBuffer {
+    const buffer = new ArrayBuffer(int16Array.length * 2);
+    const view = new Int16Array(buffer);
+    view.set(int16Array);
+    return buffer;
 }
 
 
