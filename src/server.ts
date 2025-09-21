@@ -277,56 +277,18 @@ async function converse(): Promise<void> {
         const testBuffer = new ArrayBuffer(1024); // 512 samples * 2 bytes = 1024 bytes
         session.sendAudio(testBuffer);
 
-        let consecutiveQuietFrames = 0;
-        const MAX_QUIET_FRAMES = 100; // About 3 seconds of quiet before warning
-
         // Main loop: read frames and push to the session
         while (active) {
             if (!mic.isRecording) {
-                await sleep(10);
+                await sleep(1);
                 continue;
             }
 
-            const frame = await mic.read(); // Int16Array (FRAME_LENGTH samples)
-
-            // Debug VU: find peak absolute sample to see if mic is "hot"
-            let peak = 0;
-            let sum = 0;
-            for (let i = 0; i < frame.length; i++) {
-                const v = Math.abs(frame[i] ?? 0);
-                if (v > peak) peak = v;
-                sum += v;
-            }
-            const avg = sum / frame.length;
+            const frame = await mic.read();
 
             const abuf = converAudioToArrayBuffer(frame);
 
-            // Send to OpenAI
             session.sendAudio(abuf);
-            framesSent++;
-            bytesSent += abuf.byteLength;
-
-            // Track quiet periods
-            if (peak < 100) {
-                consecutiveQuietFrames++;
-            } else {
-                consecutiveQuietFrames = 0;
-            }
-
-            // Log every ~1s @ 512 samples/16kHz ≈ 32ms per frame => ~31 frames ≈ 1s
-            if (framesSent % 31 === 0) {
-                console.log(
-                    `🎙️ tx frame#${framesSent} (+${abuf.byteLength} bytes), peak=${peak}, avg=${avg.toFixed(1)}`
-                );
-
-                if (peak < 200) {
-                    console.log("🤫 very quiet input — check mic gain / device index");
-                }
-
-                if (consecutiveQuietFrames > MAX_QUIET_FRAMES) {
-                    console.warn(`⚠️ No significant audio for ${consecutiveQuietFrames} frames (~${(consecutiveQuietFrames * 32).toFixed(0)}ms)`);
-                }
-            }
 
             // Small delay to prevent overwhelming
             await sleep(5);
