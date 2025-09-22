@@ -1,35 +1,23 @@
 import { PvRecorder } from "@picovoice/pvrecorder-node";
-import { speak, transcribe } from "./speak";
 import { sleep } from "./utils";
-import { SessionTimer } from "./timer";
 import { spawn, ChildProcess } from 'child_process';
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
+import { config } from "dotenv";
+
+config();
 
 const SAMPLE_RATE = 24000;
 const ALSA_DEVICE = "plughw:4,0"
 const MODEL = "gpt-4o-realtime-preview-2024-12-17";
-const VAD_THRESHOLD = 0.5
-const SILENCE_MS = 600
+const VAD_THRESHOLD = 0.7
+const SILENCE_MS = 1000
 const FRAME_LENGTH = 512;
-let IS_PLAYING_AUDIO = false;
 const DEVICE_INDEX = 3;
+
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
 
-
-export function setAudioPlayingState(playing: boolean) {
-    IS_PLAYING_AUDIO = playing;
-    console.log(playing ? "Audio playback started" : "Audio playback stopped");
-}
-
-
-function converAudioToArrayBuffer(int16Array: Int16Array): ArrayBuffer {
-    const buffer = new ArrayBuffer(int16Array.length * 2);
-    const view = new Int16Array(buffer);
-    view.set(int16Array);
-    return buffer;
-}
 
 export async function converse(): Promise<void> {
     const agent = new RealtimeAgent({
@@ -41,6 +29,7 @@ export async function converse(): Promise<void> {
         transport: "websocket",
         model: MODEL,
         config: {
+            instructions: "You are a helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
             outputModalities: ["audio"],
             audio: {
                 input: {
@@ -57,7 +46,8 @@ export async function converse(): Promise<void> {
                 },
             },
         },
-    });
+    })
+    let isPlayingAudio = false;
 
     // ---- audio OUT (agent -> ALSA) ----
     let aplay: ChildProcess | null = null;
@@ -74,12 +64,15 @@ export async function converse(): Promise<void> {
         ], { stdio: ["pipe", "ignore", "ignore"] });
 
         aplay.on("close", () => {
-            console.log("🔊 aplay closed");
+            console.log("🔊 Audio playback finished");
             aplay = null;
+            isPlayingAudio = false;
         });
+
         aplay.on("error", (err) => {
-            console.error("🔊 aplay error:", err);
+            console.error("aplay error:", err);
             aplay = null;
+            isPlayingAudio = false;
         });
     };
 
@@ -87,13 +80,13 @@ export async function converse(): Promise<void> {
     let bytesSent = 0;
     let lastRxAt = Date.now();
     let audioReceived = false;
+    let micPaused = false;
 
     // triggered when there is new audio ready to play to the user
     session.on("audio", (evt) => {
         const size = evt.data?.byteLength ?? 0;
         lastRxAt = Date.now();
         audioReceived = true;
-        console.log(`🔊 rx audio: ${size} bytes`);
 
         ensureAplay();
         if (aplay?.stdin?.writable && size > 0) {
@@ -103,7 +96,19 @@ export async function converse(): Promise<void> {
     });
 
     session.on("audio_start", (evt) => {
-        console.log("agent is starting to generate audio", evt)
+        console.log("🔊 Agent is starting to speak...");
+        isPlayingAudio = true;
+        micPaused = true;
+    });
+
+    session.on("agent_end", (evt) => {
+        console.log("✅ Agent finished response");
+        // Add a small delay before resuming mic to let audio finish
+        setTimeout(() => {
+            micPaused = false;
+            console.log("🎙️ Microphone resumed");
+        }, 500); // 500ms delay
+        isPlayingAudio = false;
     });
 
 
@@ -111,9 +116,6 @@ export async function converse(): Promise<void> {
         console.log("there was an error", evt)
     });
 
-    session.on("audio_stopped", (evt) => {
-        console.log("the adio is done")
-    })
 
     session.on("agent_end", (evt) => {
         console.log("the agent is done ")
@@ -149,25 +151,20 @@ export async function converse(): Promise<void> {
         // Give a moment for connection to stabilize
         await sleep(1000);
 
-        // Send initial test to see if connection works
-        console.log("📤 Sending initial silence to test connection...");
-        const testBuffer = new ArrayBuffer(1024); // 512 samples * 2 bytes = 1024 bytes
-        session.sendAudio(testBuffer);
-
-        // Main loop: read frames and push to the session
+        // Main loop
         while (active) {
-            if (!mic.isRecording) {
-                await sleep(1);
+            if (!mic.isRecording || micPaused) {
+                await sleep(10);
                 continue;
             }
 
             const frame = await mic.read();
-
             const abuf = converAudioToArrayBuffer(frame);
-
             session.sendAudio(abuf);
 
-            // Small delay to prevent overwhelming
+            framesSent++; // Track frames for debugging
+            bytesSent += abuf.byteLength;
+
             await sleep(5);
         }
 
@@ -180,61 +177,14 @@ export async function converse(): Promise<void> {
     }
 }
 
-async function converseOld(
-    recorder: PvRecorder,
-) {
-    const sessionIdleMs = 12000;
-    const turnSilenceMs = 800;
 
-    console.log("🗣️ Conversation mode (no wake word needed) — I'm listening…");
-
-    const sessionTimer = new SessionTimer(sessionIdleMs);
-
-    while (!sessionTimer.isExpired()) {
-
-        if (IS_PLAYING_AUDIO) {
-            console.log("Audio is playing, waiting...");
-            sessionTimer.pause();
-
-            while (IS_PLAYING_AUDIO) {
-                await sleep(100);
-            }
-
-            console.log("Audio finished, waiting 2 seconds for echoes...");
-            await sleep(2000);
-
-            sessionTimer.resume();
-        }
-
-        const transcript = await transcribe(recorder, IS_PLAYING_AUDIO, {
-            silenceMs: turnSilenceMs,
-            maxOverallMs: Math.min(sessionTimer.getRemainingMs(), sessionIdleMs),
-        });
-
-        if (!transcript) {
-            console.log("No transcript - session ending");
-            break;
-        }
-
-        sessionTimer.reset();
-
-        sessionTimer.pause();
-        IS_PLAYING_AUDIO = true;
-        console.log("Audio playback started");
-        recorder.stop()
-
-        try {
-            await speak(transcript);
-        } finally {
-            IS_PLAYING_AUDIO = false;
-            console.log("Audio playback stopped");
-            sessionTimer.resume();
-            recorder.start()
-        }
-    }
-
-    console.log("↩Returning to wake mode");
+function converAudioToArrayBuffer(int16Array: Int16Array): ArrayBuffer {
+    const buffer = new ArrayBuffer(int16Array.length * 2);
+    const view = new Int16Array(buffer);
+    view.set(int16Array);
+    return buffer;
 }
+
 
 async function cleanUpStream(
     mic: PvRecorder | null,
