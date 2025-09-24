@@ -9,7 +9,6 @@ to test recording using alsa:
 the commands to set things up if they're not working:
 
 ```bash
-orangepi@orangepizero3:~/sage$ pulseaudio --start
 orangepi@orangepizero3:~/sage$ pulseaudio -k
 orangepi@orangepizero3:~/sage$ pulseaudio --start
 orangepi@orangepizero3:~/sage$ pactl list short sources
