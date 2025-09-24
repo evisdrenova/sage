@@ -242,7 +242,6 @@
 
 
 import { PvRecorder } from "@picovoice/pvrecorder-node";
-import { sleep } from "./utils";
 import { spawn, ChildProcess } from 'child_process';
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { config } from "dotenv";
