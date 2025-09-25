@@ -83,6 +83,7 @@ export async function converse(): Promise<void> {
     let isPlayingAudio = false;
 
     let aplay: ChildProcess | null = null;
+    let micPaused = false;
 
     const ensureAplay = () => {
         if (!aplay) {
@@ -92,28 +93,11 @@ export async function converse(): Promise<void> {
         }
     };
 
-    let micGate = false;
-    // const gateFor = (ms: number) => {
-    //     micGate = true;
-    //     setTimeout(() => (micGate = false), ms);
-    // };
-
-    // let framesSent = 0;
-    // let bytesSent = 0;
-    let lastRxAt = Date.now();
-    let audioReceived = false;
-    let micPaused = false;
-
     // triggered when there is new audio ready to play to the user
     session.on("audio", (evt) => {
-        const size = evt.data?.byteLength ?? 0;
-        lastRxAt = Date.now();
-        audioReceived = true;
-
         ensureAplay();
-        if (aplay?.stdin?.writable && size > 0) {
-            const buf = Buffer.from(new Uint8Array(evt.data));
-            aplay.stdin.write(buf);
+        if (aplay?.stdin?.writable && evt.data?.byteLength) {
+            aplay.stdin.write(Buffer.from(new Uint8Array(evt.data)));
         }
     });
 
@@ -134,30 +118,24 @@ export async function converse(): Promise<void> {
         console.log("Agent starting it's work on the response");
         setTimeout(() => {
             micPaused = false;
-            console.log("🎙️ Microphone resumed");
+            console.log("Microphone resumed");
         }, 500); // 500ms delay
         isPlayingAudio = false;
     });
 
 
-    session.on("agent_end", (evt) => {
-        console.log("Agent finished it's work on the response");
+    session.on("agent_end", () => {
+        console.log("Response complete");
         setTimeout(() => {
             micPaused = false;
-            console.log("🎙️ Microphone resumed");
-        }, 500); // 500ms delay
-        isPlayingAudio = false;
+            console.log("Listening resumed");
+        }, 300);
     });
 
 
     session.on("error", (evt) => {
         console.log("there was an error", evt)
     });
-
-
-    session.on("agent_end", (evt) => {
-        console.log("the agent is done ")
-    })
 
 
     let active = true;
@@ -173,8 +151,7 @@ export async function converse(): Promise<void> {
 
     // Push mic bytes to the session as they arrive
     rec.stdout.on("data", (chunk: Buffer) => {
-        // drop during the brief gate window
-        if (micGate) return;
+        if (micPaused) return;
         session.sendAudio(
             chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer
         );
