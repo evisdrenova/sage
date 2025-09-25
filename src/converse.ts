@@ -238,9 +238,6 @@
 // }
 
 
-// updated but issue with the input now not being captured, somethign with the source
-
-
 import { PvRecorder } from "@picovoice/pvrecorder-node";
 import { spawn, ChildProcess } from 'child_process';
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
