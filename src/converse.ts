@@ -8,7 +8,7 @@ const SAMPLE_RATE = 16000;
 const PLAYBACK_RATE = 24000
 const PULSE_SOURCE = "echocancel_source";
 const PULSE_SINK = "default";
-const MODEL = "gpt-4o-realtime-preview-2024-12-17";
+const MODEL = "gpt-realtime-2025-08-28" //gpt-4o-realtime-preview-2024-12-17";
 const VAD_THRESHOLD = 0.7;
 const SILENCE_MS = 1000;
 
@@ -29,7 +29,7 @@ function startPulseCapture(device = PULSE_SOURCE, rate = SAMPLE_RATE, channels =
 }
 
 // spawn aplay child process to play back the audio from the agent
-function startAplay(rate = PLAYBACK_RATE): ChildProcess {
+function startAplay(rate: number): ChildProcess {
     const p = spawn(
         "aplay",
         [
@@ -74,30 +74,32 @@ export async function converse(): Promise<void> {
                 },
                 output: {
                     voice: 'alloy',
-                    format: "pcm16"
+                    format: "pcm16",
                 },
             },
         },
     })
+
     let isPlayingAudio = false;
 
     let aplay: ChildProcess | null = null;
+
     const ensureAplay = () => {
         if (!aplay) {
-            aplay = startAplay(SAMPLE_RATE);
+            aplay = startAplay(PLAYBACK_RATE);
             aplay.on("close", () => (aplay = null));
             aplay.on("error", () => (aplay = null));
         }
     };
 
     let micGate = false;
-    const gateFor = (ms: number) => {
-        micGate = true;
-        setTimeout(() => (micGate = false), ms);
-    };
+    // const gateFor = (ms: number) => {
+    //     micGate = true;
+    //     setTimeout(() => (micGate = false), ms);
+    // };
 
-    let framesSent = 0;
-    let bytesSent = 0;
+    // let framesSent = 0;
+    // let bytesSent = 0;
     let lastRxAt = Date.now();
     let audioReceived = false;
     let micPaused = false;
@@ -116,14 +118,30 @@ export async function converse(): Promise<void> {
     });
 
     session.on("audio_start", (evt) => {
-        console.log("🔊 Agent is starting to speak...");
+        console.log("Agent is starting to speak...");
         isPlayingAudio = true;
         micPaused = true;
     });
 
+    session.on("audio_stopped", (evt) => {
+        console.log("Agent is done generating audio");
+        isPlayingAudio = true;
+        micPaused = true;
+    });
+
+
+    session.on("agent_start", (evt) => {
+        console.log("Agent starting it's work on the response");
+        setTimeout(() => {
+            micPaused = false;
+            console.log("🎙️ Microphone resumed");
+        }, 500); // 500ms delay
+        isPlayingAudio = false;
+    });
+
+
     session.on("agent_end", (evt) => {
-        console.log("✅ Agent finished response");
-        // Add a small delay before resuming mic to let audio finish
+        console.log("Agent finished it's work on the response");
         setTimeout(() => {
             micPaused = false;
             console.log("🎙️ Microphone resumed");
@@ -151,13 +169,12 @@ export async function converse(): Promise<void> {
 
     await session.connect({ apiKey: OPENAI_API_KEY });
 
-    // --- IN (mic -> agent) via Pulse echo-cancel source ---
     const rec = startPulseCapture(PULSE_SOURCE, SAMPLE_RATE, 1);
 
     // Push mic bytes to the session as they arrive
     rec.stdout.on("data", (chunk: Buffer) => {
-        if (micGate) return; // drop during the brief gate window
-        // You can send any chunk size; the SDK buffers on its side.
+        // drop during the brief gate window
+        if (micGate) return;
         session.sendAudio(
             chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer
         );
