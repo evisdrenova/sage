@@ -6,8 +6,8 @@ config();
 
 const SAMPLE_RATE = 16000;
 const PLAYBACK_RATE = 24000
-const PULSE_SOURCE = "echocancel_source";
-const PULSE_SINK = "default";
+const PULSE_SOURCE = "echocancel_source";  // Recording input
+const PULSE_SINK = "default";      // Playback output
 const MODEL = "gpt-realtime-2025-08-28" //gpt-4o-realtime-preview-2024-12-17";
 const VAD_THRESHOLD = 0.7;
 const SILENCE_MS = 1000;
@@ -33,17 +33,8 @@ function startAplay(rate: number): ChildProcess {
     const p = spawn(
         "aplay",
         [
-            "-q",
-            "-D",
-            PULSE_SINK,
-            "-f",
-            "S16_LE",
-            "-c",
-            "1",
-            "-r",
-            String(rate),
-            "-t",
-            "raw",
+            "-q", "-D", PULSE_SINK, "-f", "S16_LE", "-c", "1", "-r", String(rate),
+            "-t", "raw",
         ],
         { stdio: ["pipe", "ignore", "ignore"] }
     );
@@ -52,16 +43,17 @@ function startAplay(rate: number): ChildProcess {
 }
 
 export async function converse(): Promise<void> {
+
     const agent = new RealtimeAgent({
         name: "Assistant",
-        instructions: "You are a helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
+        instructions: "You are english speaking helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
     });
 
     const session = new RealtimeSession(agent, {
         transport: "websocket",
         model: MODEL,
         config: {
-            instructions: "You are a helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
+            instructions: "You are an english speaking helpful voice assistant. Be friendly and concise. Most of your respones should just be 1-2 sentences at most.",
             outputModalities: ["audio"],
             audio: {
                 input: {
@@ -80,10 +72,9 @@ export async function converse(): Promise<void> {
         },
     })
 
-    let isPlayingAudio = false;
-
     let aplay: ChildProcess | null = null;
-    let micPaused = false;
+    let conversationTimeout: NodeJS.Timeout | null = null;
+    let shouldExit = false;
 
     const ensureAplay = () => {
         if (!aplay) {
@@ -93,67 +84,107 @@ export async function converse(): Promise<void> {
         }
     };
 
+    const clearConversationTimeout = () => {
+        if (conversationTimeout) {
+            clearTimeout(conversationTimeout);
+            conversationTimeout = null;
+        }
+    };
+
+    const startConversationTimeout = () => {
+        clearConversationTimeout();
+        conversationTimeout = setTimeout(() => {
+            console.log("⏱No speech for 5 seconds - ending conversation");
+            shouldExit = true;
+            session.close();
+        }, 5000);
+    };
+
+
     // triggered when there is new audio ready to play to the user
     session.on("audio", (evt) => {
+        const size = evt.data?.byteLength ?? 0;
         ensureAplay();
-        if (aplay?.stdin?.writable && evt.data?.byteLength) {
-            aplay.stdin.write(Buffer.from(new Uint8Array(evt.data)));
+        if (aplay?.stdin?.writable && size > 0) {
+            const buf = Buffer.from(new Uint8Array(evt.data));
+            aplay.stdin.write(buf);
         }
     });
 
-    session.on("audio_start", (evt) => {
-        console.log("Agent is starting to speak...");
-        isPlayingAudio = true;
-        micPaused = true;
+    // raw transport events
+    session.on("transport_event", (ev) => {
+        switch (ev.type) {
+            case "input_audio_buffer.speech_started":
+                console.log("🎤 User speaking...");
+                clearConversationTimeout();
+                break;
+
+            case "response.audio_transcript.delta":
+                // Agent is generating speech
+                break;
+
+            case "response.output_audio.done":
+                console.log("🔊 Agent finished speaking");
+                break;
+
+            case "response.done":
+                console.log("✅ Response complete - starting 5s timeout");
+                startConversationTimeout();
+                break;
+
+            case "conversation.item.truncated":
+                // User interrupted the agent
+                console.log("⚡ User interrupted");
+                clearConversationTimeout();
+                break;
+        }
     });
-
-    session.on("audio_stopped", (evt) => {
-        console.log("Agent is done generating audio");
-        isPlayingAudio = true;
-        micPaused = true;
-    });
-
-
-    session.on("agent_start", (evt) => {
-        console.log("Agent starting it's work on the response");
-        setTimeout(() => {
-            micPaused = false;
-            console.log("Microphone resumed");
-        }, 500); // 500ms delay
-        isPlayingAudio = false;
-    });
-
-
-    session.on("agent_end", () => {
-        console.log("Response complete");
-        setTimeout(() => {
-            micPaused = false;
-            console.log("Listening resumed");
-        }, 300);
-    });
-
-
-    session.on("error", (evt) => {
-        console.log("there was an error", evt)
-    });
-
-
-    let active = true;
 
     session.on("error", (err) => {
         console.error("❌ Session error:", err);
-        active = false;
+        shouldExit = true;
     });
 
     await session.connect({ apiKey: OPENAI_API_KEY });
+    console.log("Connected to OpenAI");
 
     const rec = startPulseCapture(PULSE_SOURCE, SAMPLE_RATE, 1);
+    console.log("Parec started for conversation");
 
-    // Push mic bytes to the session as they arrive
+    // rec.stdout.on("data", (chunk: Buffer) => {
+    //     if (shouldExit) return;
+
+    //     // Convert float32le to int16le
+    //     const float32Array = new Float32Array(
+    //         chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
+    //     );
+    //     const int16Array = new Int16Array(float32Array.length);
+
+    //     for (let i = 0; i < float32Array.length; i++) {
+    //         const val = Math.max(-1, Math.min(1, float32Array[i] ?? 0));
+    //         int16Array[i] = val * 32767;
+    //     }
+
+    //     session.sendAudio(int16Array.buffer);
+    // });
+
     rec.stdout.on("data", (chunk: Buffer) => {
-        if (micPaused) return;
+        if (shouldExit) return;
         session.sendAudio(
             chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer
         );
+    });
+
+    // Wait for conversation to end
+    return new Promise((resolve) => {
+        const checkExit = setInterval(() => {
+            if (shouldExit) {
+                clearInterval(checkExit);
+                clearConversationTimeout();
+                rec.kill("SIGINT");
+                if (aplay?.pid) aplay.kill("SIGTERM");
+                resolve();
+            }
+        }, 100);
     });
 }

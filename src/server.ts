@@ -11,7 +11,7 @@ const KEYWORD = BuiltinKeyword.COMPUTER;
 const SENSITIVITY = 0.5;
 const REFRACTORY_MS = 750;
 
-const PULSE_SOURCE = process.env.PULSE_SOURCE || "echocancel_source";
+const PULSE_SOURCE = "echocancel_source";
 
 // spawns a parec (pulseaudio recorder) process to stream raw audio data (16-bit, -6KHZ, mono) fropm microphone 
 function startParec(source = PULSE_SOURCE): ChildProcess {
@@ -41,7 +41,7 @@ export async function start() {
     const shutdown = async () => {
         if (shuttingDown) return;
         shuttingDown = true;
-        console.log("\nShutting down...");
+        console.log("received a SIGINT or SIGTERM, shutting down")
         try {
             if (recorder && recorder.pid) try { recorder.kill("SIGINT"); } catch { }
             if (porcupine) try { porcupine.release(); } catch { }
@@ -54,6 +54,7 @@ export async function start() {
 
     try {
         porcupine = new Porcupine(ACCESS_KEY, [KEYWORD], [SENSITIVITY]);
+
         recorder = startParec();
         console.log(`Ready! Listening for wake word ...`);
 
@@ -91,34 +92,29 @@ export async function start() {
 
                     console.log("Wake word detected!");
 
-                    if (recorder?.pid) {
-                        recorder.kill("SIGINT");
-                        // Don't log "parec exited" - this is expected
-                        recorder.removeAllListeners("close");
-                    }
+                    // Stop recording while we converse
+                    try { if (recorder?.pid) recorder.kill("SIGINT"); } catch { }
                     recorder = null;
+                    // clean buffer
                     buf = Buffer.alloc(0);
 
                     try {
                         await converse();
                     } catch (e) {
-                        console.error("Conversation error:", e);
+                        console.error("converse() error:", e);
                     }
 
                     // After conversation, restart recorder and continue wake mode
                     recorder = startParec();
-                    console.log("\nListening for wake word...");
+                    console.log("Back to listening for wake word");
                 }
             }
         });
 
-        // Only log unexpected exits
         recorder.on("close", (code) => {
-            if (!shuttingDown && recorder !== null) {
-                console.warn(`Unexpected parec exit (${code}), restarting...`);
-                setTimeout(() => {
-                    if (!shuttingDown) recorder = startParec();
-                }, 500);
+            if (!shuttingDown) {
+                console.warn(`parec exited (${code}); restarting in 500ms...`);
+                setTimeout(() => { if (!shuttingDown) recorder = startParec(); }, 500);
             }
         });
 

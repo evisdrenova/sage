@@ -23,7 +23,9 @@ setup-audio:
 		sink_master=alsa_output.usb-Jieli_Technology_UACDemoV1.0_4150344B32373109-00.analog-stereo \
 		use_master_format=1 \
 		source_name=echocancel_source \
-		sink_name=echocancel_sink
+		sink_name=echocancel_sink \
+		rate=16000 \
+  		format=s16le
 	@echo "🎯 Setting default devices..."
 	pactl set-default-source echocancel_source
 	pactl set-default-sink echocancel_sink
