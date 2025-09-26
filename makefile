@@ -1,7 +1,3 @@
-#!/usr/bin/make -f
-
-# Makefile for PulseAudio Echo Cancellation Setup
-
 .PHONY: setup-audio test-audio clean-audio list-devices
 
 # Main setup command - restarts PulseAudio and configures echo cancellation

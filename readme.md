@@ -7,11 +7,11 @@ Open source voice agent that runs on a raspberry pi.
 1. Main process starts
 2. Start parec for wake word detection 
 3. User says wake word
-4. Picovoice picks it up. Kill parec, start conversation mode:
+4. Picovoice picks it up. Kill parec process so we can't interrupt it (probably will change this later), start conversation mode:
     a. Start new parec for user input
     b. Connect to OpenAI Realtime API
 LOOP:
-5. User speaks (mic is still active for interruptions)
+5. User speaks 
 6. Agent responds
 7. OpenAI VAD detects silence and fires conversation.item.completed or similar event
     a. On completion: set a 5-second timeout

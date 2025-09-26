@@ -242,11 +242,9 @@ export async function converse(): Promise<void> {
     await session.connect({ apiKey: OPENAI_API_KEY });
     console.log("Connected to OpenAI");
 
-    // Start recording initially
     startMic();
     console.log("Listening for user input");
 
-    // Start initial timeout
     startConversationTimeout();
 
     return new Promise((resolve) => {
