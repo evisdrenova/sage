@@ -13,7 +13,7 @@ const REFRACTORY_MS = 750;
 
 const PULSE_SOURCE = "echocancel_source";
 
-// spawns a parec (pulseaudio recorder) process to stream raw audio data (16-bit, -6KHZ, mono) fropm microphone 
+// spawns a parec (pulseaudio recorder) process to stream raw audio data (16-bit, 16KHZ, mono) from microphone 
 function startParec(source = PULSE_SOURCE): ChildProcess {
     const p = spawn("parec", [
         `--device=${source}`,
@@ -37,6 +37,7 @@ export async function start() {
     let recorder: ChildProcess | null = null;
     let shuttingDown = false;
     let lastDetect = 0;
+    let intentionalStop = false;
 
     const shutdown = async () => {
         if (shuttingDown) return;
@@ -68,7 +69,7 @@ export async function start() {
             buf = Buffer.concat([buf, chunk]);
             // keep processing frames until buffer is too small
             while (buf.length >= BYTES_PER_FRAME) {
-                // once we have BYTES_PER_FRAME bytes, extra a full frame
+                // once we have BYTES_PER_FRAME bytes, extract a full frame
                 const frameBytes = buf.subarray(0, BYTES_PER_FRAME);
                 // remove the processed bytes
                 buf = buf.subarray(BYTES_PER_FRAME);
@@ -93,18 +94,20 @@ export async function start() {
                     console.log("Wake word detected!");
 
                     // Stop recording while we converse
+                    intentionalStop = true; // Mark this as intentional stop
                     try { if (recorder?.pid) recorder.kill("SIGINT"); } catch { }
                     recorder = null;
                     // clean buffer
                     buf = Buffer.alloc(0);
 
                     try {
+                        console.log("before converse")
                         await converse();
+                        console.log("after converse")
                     } catch (e) {
                         console.error("converse() error:", e);
                     }
 
-                    // After conversation, restart recorder and continue wake mode
                     recorder = startParec();
                     console.log("Back to listening for wake word");
                 }
@@ -112,10 +115,13 @@ export async function start() {
         });
 
         recorder.on("close", (code) => {
-            if (!shuttingDown) {
+            if (!shuttingDown && !intentionalStop) {
                 console.warn(`parec exited (${code}); restarting in 500ms...`);
-                setTimeout(() => { if (!shuttingDown) recorder = startParec(); }, 500);
+                setTimeout(() => {
+                    if (!shuttingDown) recorder = startParec();
+                }, 500);
             }
+            intentionalStop = false;
         });
 
     } catch (err) {
