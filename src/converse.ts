@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { config } from "dotenv";
+import { createMemoryTool } from './tools';
 
 config();
 
@@ -38,6 +39,7 @@ export async function converse(): Promise<void> {
     const agent = new RealtimeAgent({
         name: "Assistant",
         instructions: "You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.",
+        tools: [createMemoryTool]
     });
 
     const session = new RealtimeSession(agent, {
