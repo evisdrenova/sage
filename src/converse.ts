@@ -1,4 +1,3 @@
-// converse.ts - Fixed with proper mic pausing during agent speech
 import { spawn, ChildProcess } from 'child_process';
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { config } from "dotenv";
