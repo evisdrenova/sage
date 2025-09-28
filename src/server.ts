@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from "child_process";
 import { config } from "dotenv";
 import { converse } from "./converse";
 import { loadSession } from "./session";
+import { join } from 'path';
 
 config();
 
@@ -12,6 +13,8 @@ const KEYWORD = BuiltinKeyword.COMPUTER;
 const SENSITIVITY = 0.5;
 const REFRACTORY_MS = 750;
 const PULSE_SOURCE = "echocancel_source";
+const KEY_WORD_PATH = './hey_sage.ppn';
+
 
 // spawns a parec (pulseaudio recorder) process to stream raw audio data (16-bit, 16KHZ, mono) from microphone 
 function startParec(source = PULSE_SOURCE): ChildProcess {
@@ -56,7 +59,8 @@ export async function start() {
     process.on("SIGTERM", shutdown);
 
     try {
-        porcupine = new Porcupine(ACCESS_KEY, [KEYWORD], [SENSITIVITY]);
+        const KEY_WORD_PATH = join(__dirname, '..', 'hey_sage.ppn');
+        porcupine = new Porcupine(ACCESS_KEY, [KEY_WORD_PATH], [SENSITIVITY]);
 
         recorder = startParec();
         console.log(`Ready! Listening for wake word ...`);
