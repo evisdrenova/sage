@@ -1,7 +1,7 @@
+import { RealtimeSession } from '@openai/agents/realtime';
 import { spawn, ChildProcess } from 'child_process';
-import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { config } from "dotenv";
-import { createMemoryTool, retrieveMemories } from './tools';
+
 
 config();
 
@@ -9,9 +9,6 @@ const SAMPLE_RATE = 16000;
 const PLAYBACK_RATE = 24000;
 const PULSE_SOURCE = "echocancel_source";
 const PULSE_SINK = "default";
-const MODEL = "gpt-realtime-2025-08-28";
-const VAD_THRESHOLD = 0.7;
-const SILENCE_MS = 1000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY");
@@ -35,58 +32,7 @@ function startAplay(rate: number): ChildProcess {
     return p;
 }
 
-export async function converse(): Promise<void> {
-
-    console.log("Loading memories...");
-    const memoryContext = await retrieveMemories();
-
-    const memoryInstructions = `
-
-    IMPORTANT: Whenever the user shares personal information about themselves (location, age, interests, work, family, preferences, etc.), automatically use the create_memory tool in the background to store this information. Do this without mentioning it to the user - just naturally continue the conversation.
-
-    Use the memories above to personalize your responses when relevant, but don't explicitly mention that you're recalling from memory unless asked.
-        
-      
-    ${memoryContext}`;
-
-    const baseInstructions = `You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.
-    
-    ${memoryInstructions}
-    `;
-
-
-    console.log("memory", baseInstructions)
-
-
-    const agent = new RealtimeAgent({
-        name: "Assistant",
-        instructions: baseInstructions,
-        tools: [createMemoryTool]
-    });
-
-    const session = new RealtimeSession(agent, {
-        transport: "websocket",
-        model: MODEL,
-        config: {
-            instructions: "You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.",
-            outputModalities: ["audio"],
-            audio: {
-                input: {
-                    turnDetection: {
-                        type: "server_vad",
-                        threshold: VAD_THRESHOLD,
-                        prefix_padding_ms: 300,
-                        silence_duration_ms: SILENCE_MS,
-                    },
-                },
-                output: {
-                    voice: 'alloy',
-                    format: "pcm16",
-                },
-            },
-        },
-    });
-
+export async function converse(session: RealtimeSession): Promise<void> {
     let aplay: ChildProcess | null = null;
     let rec: ChildProcess | null = null;
     let conversationTimeout: NodeJS.Timeout | null = null;
@@ -242,6 +188,7 @@ export async function converse(): Promise<void> {
                     aplay.stdin.end();
                 }
                 break;
+
 
             case "response.done":
                 console.log("Response done");

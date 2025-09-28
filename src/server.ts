@@ -2,6 +2,7 @@ import { Porcupine, BuiltinKeyword } from "@picovoice/porcupine-node";
 import { spawn, ChildProcess } from "child_process";
 import { config } from "dotenv";
 import { converse } from "./converse";
+import { loadSession } from "./session";
 
 config();
 
@@ -10,7 +11,6 @@ const SAMPLE_RATE = 16000;
 const KEYWORD = BuiltinKeyword.COMPUTER;
 const SENSITIVITY = 0.5;
 const REFRACTORY_MS = 750;
-
 const PULSE_SOURCE = "echocancel_source";
 
 // spawns a parec (pulseaudio recorder) process to stream raw audio data (16-bit, 16KHZ, mono) from microphone 
@@ -38,6 +38,8 @@ export async function start() {
     let shuttingDown = false;
     let lastDetect = 0;
     let intentionalStop = false;
+
+    const session = await loadSession()
 
     const shutdown = async () => {
         if (shuttingDown) return;
@@ -102,7 +104,7 @@ export async function start() {
 
                     try {
                         console.log("before converse")
-                        await converse();
+                        await converse(session);
                         console.log("after converse")
                     } catch (e) {
                         console.error("converse() error:", e);
