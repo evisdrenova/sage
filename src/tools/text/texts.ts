@@ -5,7 +5,6 @@ import { BlueBubblesMessenger, SendTextArgs } from './text_client';
 
 config();
 
-
 const textClient = new BlueBubblesMessenger();
 
 export const sendTextTool = tool({
