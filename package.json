@@ -19,6 +19,7 @@
     "@picovoice/porcupine-node": "^3.0.6",
     "@picovoice/pvrecorder-node": "^1.2.8",
     "@supabase/supabase-js": "^2.58.0",
+    "axios": "^1.12.2",
     "dotenv": "^17.2.1",
     "openai": "^5.23.1",
     "ws": "^8.18.3",

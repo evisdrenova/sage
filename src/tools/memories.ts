@@ -10,7 +10,6 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || ''
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
-
 export const createMemoryTool = tool({
     name: 'create_memory',
     description: "Creates a new memory and stores it in the database",

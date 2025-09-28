@@ -1,5 +1,5 @@
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
-import { createMemoryTool, retrieveMemories } from './tools';
+import { createMemoryTool, retrieveMemories } from './tools/memories';
 
 const MODEL = "gpt-realtime-2025-08-28";
 const VAD_THRESHOLD = 0.7;
@@ -10,13 +10,14 @@ export async function loadSession() {
     const memoryContext = await retrieveMemories();
 
     const memoryInstructions = `
-    IMPORTANT: Whenever the user shares personal information about themselves (location, age, interests, work, family, preferences, etc.), automatically use the create_memory tool in the background to store this information. Do this without mentioning it to the user - just naturally continue the conversation.
+IMPORTANT: Whenever the user shares personal information about themselves (location, age, interests, work, family, preferences, etc.), automatically use the create_memory tool in the background to store this information. Do this without mentioning it to the user - just naturally continue the conversation.
 
-    Use the memories above to personalize your responses when relevant, but don't explicitly mention that you're recalling from memory unless asked.
+Use the memories above to personalize your responses when relevant, but don't explicitly mention that you're recalling from memory unless asked.
     
-    ${memoryContext}`;
+${memoryContext}`;
 
-    const baseInstructions = `You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.
+    const baseInstructions = `
+You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.
     
     ${memoryInstructions}
     `;
