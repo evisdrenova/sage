@@ -1,18 +1,22 @@
 import { tool } from '@openai/agents'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod';
+import { config } from "dotenv";
+
+config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL || ''
 const SUPABASE_KEY = process.env.SUPABASE_KEY || ''
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
+
 export const createMemoryTool = tool({
     name: 'create_memory',
     description: "Creates a new memory and stores it in the database",
     parameters: z.object({
         memory: z.string().describe("A concise fact about the user, e.g., 'Lives in Boston', 'Birthday is March 15th', 'Has two dogs named Max and Luna', 'Works as a software engineer'"),
-        category: z.string().optional().describe("Category of memory: personal, preferences, family, work, location, interests, etc.")
+        category: z.string().optional().nullable().describe("Category of memory: personal, preferences, family, work, location, interests, etc.")
     }),
     async execute({ memory, category }) {
         try {
@@ -21,7 +25,6 @@ export const createMemoryTool = tool({
                 .insert({
                     memory: memory,
                     category: category || 'general',
-                    // created_at: new Date().toISOString()
                 })
                 .select()
                 .single()
@@ -40,15 +43,13 @@ export const createMemoryTool = tool({
     }
 })
 
-
-
 export async function retrieveMemories(): Promise<string> {
     try {
         const { data, error } = await supabase
             .from('memories')
             .select('memory, category, created_at')
             .order('created_at', { ascending: false })
-            .limit(50) // Get the most recent 50 memories
+            .limit(50)
 
         if (error) {
             console.error("Error retrieving memories:", error)
@@ -60,7 +61,6 @@ export async function retrieveMemories(): Promise<string> {
             return ""
         }
 
-        // Format memories into a context string
         const memoriesByCategory = data.reduce((acc, mem) => {
             const cat = mem.category || 'general'
             if (!acc[cat]) acc[cat] = []

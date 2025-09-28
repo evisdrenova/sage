@@ -41,6 +41,3 @@ make clean-audio
 # Show help
 make help
 ```
-
-Check your default source, should be `echocancel_source`
-`pactl get-default-source`
