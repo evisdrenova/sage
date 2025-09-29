@@ -1,9 +1,10 @@
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { createMemoryTool, retrieveMemories } from './tools/memories';
+import { sendTextTool } from './tools/text/texts';
 
 const MODEL = "gpt-realtime-2025-08-28";
 const VAD_THRESHOLD = 0.7;
-const SILENCE_MS = 5000;
+const SILENCE_MS = 3000;
 
 export async function loadSession() {
     console.log("Loading memories...");
@@ -18,18 +19,19 @@ ${memoryContext}`;
 
     const baseInstructions = `
 You are an english-speaking helpful voice assistant. Be friendly and concise. Most of your responses should just be 1-2 sentences at most.
+
+If the user asks you to perform any action, you should respond and confirm that you are completing the action. For example:
+
+User: "Hey Sage, can you send a text to John asking him what time is the game?"
+You: "Sending a text to John asking him about the time of the game".
     
     ${memoryInstructions}
     `;
 
-
-    console.log("memory", baseInstructions)
-
-
     const agent = new RealtimeAgent({
         name: "Assistant",
         instructions: baseInstructions,
-        tools: [createMemoryTool]
+        tools: [createMemoryTool, sendTextTool]
     });
 
     return new RealtimeSession(agent, {
