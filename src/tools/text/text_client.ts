@@ -1,42 +1,31 @@
-
-import { tool } from '@openai/agents'
-import { z } from 'zod';
-import { config } from "dotenv";
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as crypto from "node:crypto";
 
 type SendMethod = "auto" | "private-api" | "apple-script";
-
-interface SendTextToolArgs {
-    recipient?: string;
-    chatGuid?: string;
-    message: string;
-    method?: SendMethod; // 'auto' | 'private-api' | 'apple-script'
-};
-
-export interface BlueBubblesResponse {
-    status?: number;
-    message?: string;
-    [key: string]: unknown;
-}
-
 
 export interface BlueBubblesOptions {
     baseUrl?: string;
     password?: string;
     defaultMethod?: SendMethod;
-    timeoutMs?: number; // default 10000
-    contactsPath?: string; // optional path to JSON mapping {"Mom":"+1555..."}
+    timeoutMs?: number;
+    contactsPath?: string;
 }
 
 export interface SendTextArgs {
-    chatGuid: string; // the recipient's number
+    chatGuid: string;
     message: string;
     method: SendMethod
     tempGuid: string;
 }
+
+export interface BlueBubblesResponse {
+    status?: number;
+    message?: string;
+    data?: any;
+    error?: any;
+}
+
 
 export class BlueBubblesMessenger {
     private baseUrl: string;
@@ -46,8 +35,6 @@ export class BlueBubblesMessenger {
     private contacts: Record<string, string> = {};
     private http: AxiosInstance;
 
-
-
     constructor(opts: BlueBubblesOptions = {}) {
         const BLUEBUBBLES_URL = process.env.BLUEBUBBLES_URL || "";
         const BLUEBUBBLES_PASSWORD = process.env.BLUEBUBBLES_PASSWORD || "";
@@ -56,11 +43,18 @@ export class BlueBubblesMessenger {
         this.defaultMethod = opts.defaultMethod || "auto";
         this.timeoutMs = opts.timeoutMs ?? 10_000;
 
-        if (!this.baseUrl || !this.password) {
+        if (!this.baseUrl) {
             throw new BlueBubblesError(
-                "Missing baseUrl/password. Set BLUEBUBBLES_URL and BLUEBUBBLES_PASSWORD or pass options."
+                "Missing baseUrl"
             );
         }
+
+        if (!this.password) {
+            throw new BlueBubblesError(
+                "Missing password"
+            );
+        }
+
         if (opts.contactsPath) {
             try {
                 if (fs.existsSync(opts.contactsPath)) {
@@ -78,45 +72,35 @@ export class BlueBubblesMessenger {
     async sendText(args: SendTextArgs): Promise<BlueBubblesResponse> {
         const method = (args.method || this.defaultMethod);
 
-        let address: string | undefined;
         if (!args.chatGuid) throw new BlueBubblesError("recipient or chatGuid is required");
-        if (!args.chatGuid) throw new BlueBubblesError("recipient or chatGuid is required");
+        if (method != "apple-script") throw new BlueBubblesError("only apple-script is supported right now");
 
-
-        if (method === "apple-script") {
-            return await this._send({ chatGuid: args.chatGuid, message: args.message, method: "apple-script", tempGuid: args.tempGuid });
-
-        }
-
-        return await this._send({ chatGuid: args.chatGuid, message: args.message, method: "apple-script", tempGuid: args.tempGuid });
+        return await this._send(args.chatGuid, args.message, method, args.tempGuid);
     }
 
-    private async _send(params: { address?: string; chatGuid?: string; message: string; method: SendMethod, tempGuid?: string; }): Promise<BlueBubblesResponse> {
-        const body: Record<string, any> = { message: params.message, method: params.method };
-        if (params.chatGuid) body.chatGuid = params.chatGuid;
-        else throw new BlueBubblesError("address or chatGuid required");
 
+    private async _send(chatGuid: string, message: string, method: SendMethod, tempGuid?: string): Promise<BlueBubblesResponse> {
+        const body: Record<string, any> = { message: message, method: method };
+        if (chatGuid) {
+            body.chatGuid = chatGuid
+        } else throw new BlueBubblesError("address or chatGuid required");
 
-        if (params.method === "apple-script") {
-            body.tempGuid = params.tempGuid || this._newTempGuid();
+        if (method === "apple-script") {
+            body.tempGuid = tempGuid || this._newTempGuid();
         }
-
 
         try {
             const res = await this.http.post("/api/v1/message/text", body, {
                 params: { password: this.password },
                 headers: { "Content-Type": "application/json" },
             });
+            console.log("res.data", res.data)
             return res.data as BlueBubblesResponse;
         } catch (e) {
             throw this._axiosToError(e);
         }
     }
 
-    private _isTempGuidValidation(err: unknown): boolean {
-        const msg = String((err as any)?.message || "").toLowerCase();
-        return msg.includes("tempguid") || msg.includes("temp guid");
-    }
     private _axiosToError(e: unknown): BlueBubblesError {
         if (isAxiosError(e)) {
             const ae = e as AxiosError<any>;
@@ -139,12 +123,14 @@ function isAxiosError(e: unknown): e is AxiosError {
 
 
 export class BlueBubblesError extends Error {
-    public status?: number;
-    public details?: unknown;
+    public readonly status?: number | undefined;
+    public readonly details?: unknown;
+
     constructor(message: string, status?: number, details?: unknown) {
         super(message);
-        this.name = "BlueBubblesError";
-        this.status = status || 0;
+        this.name = 'BlueBubblesError';
+        this.status = status;
         this.details = details;
+        Object.setPrototypeOf(this, BlueBubblesError.prototype);
     }
 }
