@@ -32,7 +32,6 @@ export class BlueBubblesMessenger {
     private password: string;
     private defaultMethod: SendMethod;
     private timeoutMs: number;
-    private contacts: Record<string, string> = {};
     private http: AxiosInstance;
 
     constructor(opts: BlueBubblesOptions = {}) {
@@ -53,15 +52,6 @@ export class BlueBubblesMessenger {
             throw new BlueBubblesError(
                 "Missing password"
             );
-        }
-
-        if (opts.contactsPath) {
-            try {
-                if (fs.existsSync(opts.contactsPath)) {
-                    const raw = fs.readFileSync(opts.contactsPath, "utf-8");
-                    this.contacts = JSON.parse(raw);
-                }
-            } catch (e) { console.log("error in creating client") }
         }
 
         this.http = axios.create({ baseURL: this.baseUrl, timeout: this.timeoutMs });
