@@ -1,6 +1,8 @@
 import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
 import { createMemoryTool, retrieveMemories } from './tools/memories';
 import { sendTextTool } from './tools/text/texts';
+import { notionMCP } from './tools/notion/notion';
+import { hostedMcpTool } from '@openai/agents';
 
 const MODEL = "gpt-realtime-2025-08-28";
 const VAD_THRESHOLD = 0.7;
@@ -24,14 +26,15 @@ If the user asks you to perform any action, you should respond and confirm that 
 
 User: "Hey Sage, can you send a text to John asking him what time is the game?"
 You: "Sending a text to John asking him about the time of the game".
-    
+
     ${memoryInstructions}
     `;
 
     const agent = new RealtimeAgent({
         name: "Assistant",
         instructions: baseInstructions,
-        tools: [createMemoryTool, sendTextTool]
+        tools: [createMemoryTool, sendTextTool, hostedMcpTool({ serverLabel: "notion", serverUrl: "https://apollo.composio.dev/v3/mcp/8d950084-3023-4180-ae82-421215be6955/mcp?useComposioHelperActions=true" })],
+        // mcpServers: [notionMCP]
     });
 
     return new RealtimeSession(agent, {
